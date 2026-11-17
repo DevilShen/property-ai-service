@@ -1,0 +1,104 @@
+/**
+ * 全局排版与通用工具类。
+ * 与原型保持一致的小工具集合（.row/.between/.muted 等），W2—W4 页面直接复用，
+ * 避免每个页面重复写同样的布局代码。
+ */
+
+/* ---------- 页面基础 ---------- */
+.w-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 100%;
+}
+
+.w-page__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+/* ---------- 文字 ---------- */
+.muted {
+  color: var(--c-muted);
+}
+
+.faint {
+  color: var(--c-faint);
+}
+
+.dim {
+  font-size: var(--fs-xs);
+  color: var(--c-faint);
+}
+
+.strong {
+  font-weight: var(--fw-semibold);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* ---------- 布局工具 ---------- */
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.row-top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.divider {
+  height: 1px;
+  background: var(--c-line-2);
+  margin: var(--sp-3) 0;
+}
+
+/* ---------- 页面过渡（路由切换） ---------- */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity var(--tr-fast), transform var(--tr-fast);
+}
+
+.fade-enter-from {
+  opacity: 0;
+  transform: translateY(3px);
+}
+
+.fade-leave-to {
+  opacity: 0;
+}

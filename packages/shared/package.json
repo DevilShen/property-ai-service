@@ -1,0 +1,27 @@
+{
+  "name": "@property/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "物业 AI 智能客服平台 · 前后端共享契约（Role / ScreenKey / CopilotWorkspace / 领域 DTO / ApiResponse / Health）",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

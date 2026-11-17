@@ -1,0 +1,38 @@
+server:
+  port: 4000
+
+spring:
+  application:
+    name: property-ai-server
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+# P2 W8 演示鉴权/审计（P2-029 / P2-030 / P2-031，契约 v0.3.3 §8）
+# demo 口径：演示账号 + 本地演示 JWT（HS256），不是真实 SSO/微信/短信鉴权，不得说成真实鉴权。
+property:
+  security:
+    # 演示鉴权总开关（默认 true；生产必须 true，仅测试/离线演示置 false）
+    enabled: true
+    # HS256 演示密钥：仓库内公开值，禁止用于生产（生产走 KMS/环境变量 + 密钥轮换）
+    jwt-secret: property-ai-demo-only-jwt-secret-2026-11
+    # token 有效期（秒）：与 shared/OpenAPI AUTH_TOKEN_TTL_SECONDS = 7200 一致
+    token-ttl-seconds: 7200
+
+  # P6 W30 RAG 接线（task-80，契约 v1.4.0 /rag/query、/rag/health、/knowledge/{id}/reindex）
+  # 数据面在 Python 编排层 services/ai-orchestrator（内网 /internal/rag/*），Java 只做出站 HTTP + 映射 + 降级，
+  # 不接模型 SDK（AGENTS.md NEVER #2）。编排层不可用 → 问答降级规则检索（mode=rules）、健康 status=degraded、
+  # 重建索引 503 E-5001 + degraded（写操作不假成功）。
+  rag:
+    # 编排层内网地址（W32/W33 = services/ai-orchestrator，:4110）；不得对外暴露给前端
+    base-url: ${RAG_BASE_URL:http://127.0.0.1:4110}
+    # 内网共享 token（X-Internal-Token）；编排层 fail-closed：未配置 → 401，Java 侧走规则检索降级。
+    # demo 口径：仓库内留空，联调/部署用环境变量注入，禁止把真实 token 写入仓库/日志（NEVER #8）
+    internal-token: ${RAG_INTERNAL_TOKEN:}
+    # 单次调用预算（毫秒）：编排层生成预算 20s，BFF 取更小的 8s，超时即降级（不重试）
+    timeout-ms: 8000
+    # 出站总开关：false = 不调编排层（问答直接规则检索降级、重建索引 503），用于离线演示/演练
+    enabled: true

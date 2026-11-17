@@ -1,0 +1,5 @@
+/* 全局样式入口：token → reset → 全局排版/工具类 → 响应式收敛（放最后保证覆盖） */
+@import '../tokens/tokens.css';
+@import './reset.css';
+@import './global.css';
+@import './responsive.css';

@@ -1,0 +1,495 @@
+/**
+ * W4 · P1-035 响应式与布局收敛（全站唯一新增全局响应式文件）
+ * ---------------------------------------------------------------------------
+ * 原则
+ * 1) ≥1440 为设计基准，不改任何既有尺寸；只在 5 档断点内做「收敛/降级」。
+ * 2) 只用 @media + 选择器覆盖，不改任何 .vue / .ts / 其他 css。
+ * 3) 覆盖优先级：本文件在 styles/index.css 末尾 @import，晚于 tokens/reset/global；
+ *    但各屏 css 与 SFC scoped 样式是懒加载、注入更晚，且 scoped 选择器带 [data-v-*]
+ *    属性（特异性 0,2,0）。因此：
+ *    - 布局壳与视图类统一加 `#app` 前缀（特异性 1,x,x，稳赢 class/attr）；
+ *    - Teleport 到 body 的弹层用 `body .w-modal .w-modal__panel` 这类两段类选择器，
+ *      避免与 scoped 规则打平后按源码顺序输掉。
+ * 4) 断点（降序书写，窄断点后出现，同特异性下后者生效）：
+ *      ≤1439 小笔电   → 侧栏/边距微收
+ *      ≤1279 笔记本   → 侧栏 208、顶栏 54、栅格第一次降列
+ *      ≤1023 平板横屏 → 侧栏 188、顶栏 52、栅格降列、表格/矩阵/步骤条横向滚动
+ *      ≤899  平板竖屏 → 侧栏收成 64px 图标栏、顶栏精简、双栏屏改单列
+ *      ≤767  小屏     → 侧栏 56、弹层 max-width 收敛、面板全堆叠
+ * 5) 已知取舍：≤899 侧栏只留图标（无文字 tooltip），导航语义靠图标 + 路由；
+ *    这是 P1 演示的最小可用降级，真实移动端导航在 P2 单独设计。
+ */
+
+/* =========================================================================
+ * ≤1439 · 小笔电（1280–1439）
+ * ========================================================================= */
+@media (max-width: 1439px) {
+  :root {
+    --layout-sidebar-w: 220px;
+    --layout-stage-pad: 16px 20px 22px;
+  }
+
+  #app .w-page-header__desc {
+    max-width: 640px;
+  }
+}
+
+/* =========================================================================
+ * ≤1279 · 笔记本（1024–1279）
+ * ========================================================================= */
+@media (max-width: 1279px) {
+  :root {
+    --layout-sidebar-w: 208px;
+    --layout-topbar-h: 54px;
+    --layout-stage-pad: 14px 18px 20px;
+    --layout-copilot-rail-w: 188px;
+  }
+
+  /* 顶栏：先收间距，不禁用任何入口 */
+  #app .w-topbar {
+    gap: 10px;
+    padding: 0 16px;
+  }
+
+  #app .w-sidebar {
+    padding: 14px 10px 10px;
+  }
+
+  /* 页头：说明文字收窄，操作区允许换行，避免挤压标题 */
+  #app .w-page-header {
+    gap: 12px;
+  }
+
+  #app .w-page-header__desc {
+    max-width: 560px;
+  }
+
+  #app .w-page-header__actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 6px;
+  }
+
+  /* Copilot 左栏（8 工作区）跟着变窄，pane 保留更多宽度 */
+  #app .cop__rail {
+    width: var(--layout-copilot-rail-w);
+  }
+}
+
+/* =========================================================================
+ * ≤1023 · 平板横屏（768–1023）
+ * ========================================================================= */
+@media (max-width: 1023px) {
+  :root {
+    --layout-sidebar-w: 188px;
+    --layout-topbar-h: 52px;
+    --layout-stage-pad: 12px 16px 18px;
+    --layout-copilot-rail-w: 168px;
+  }
+
+  /* ---------------- 顶栏降级：搜索只留图标+短文案，隐藏快捷键提示 ---------------- */
+  #app .w-topbar {
+    gap: 8px;
+    padding: 0 14px;
+  }
+
+  #app .w-topbar__search {
+    width: 152px;
+  }
+
+  #app .w-topbar__kbd {
+    display: none;
+  }
+
+  #app .w-topbar__crumb-item {
+    max-width: 150px;
+  }
+
+  #app .w-topbar__menu,
+  #app .w-topbar__menu.is-wide {
+    width: min(300px, calc(100vw - 32px));
+  }
+
+  /* ---------------- 页头：窄屏改为上下两段 ---------------- */
+  #app .w-page-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    row-gap: 8px;
+  }
+
+  #app .w-page-header__actions {
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  /* ============================================================
+   * 12 屏 · 栅格降列 / 表格横向滚动
+   * ============================================================ */
+
+  /* 01 方案总览 */
+  #app .ovw-cells {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #app .ovw-caps,
+  #app .ovw-erps,
+  #app .ovw-roadmap {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 03 工单进度：7 节点行（46/16/1fr/116）压缩固定列 */
+  #app .prg-row {
+    grid-template-columns: 40px 14px minmax(0, 1fr) 100px;
+  }
+
+  #app .prg-sum {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 07 ERP 适配中心 */
+  #app .erp__conns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #app .erp__detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 10 全链路回溯 */
+  #app .trace__qa {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #app .trace__answer-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 通用数据表：保留可读列宽，超出容器时由 .w-table-wrap 横向滚动 */
+  #app .w-table {
+    min-width: 560px;
+  }
+
+  /* ============================================================
+   * W3 新组件 · 连接器 4 步向导（cwz-）
+   * ============================================================ */
+  #app .cwz-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 步骤卡片副标题原来 nowrap + 省略号，窄屏改为换行不裁切 */
+  #app .cwz-step__label,
+  #app .cwz-step__note {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+
+  #app .cwz-grid--5,
+  #app .cwz-grid--3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* 能力矩阵行（表头 + 18 行）改成横向滚动，不裁掉右侧「回退」列 */
+  #app .cwz-rows {
+    overflow-x: auto;
+  }
+
+  #app .cwz-row {
+    min-width: 560px;
+  }
+
+  /* ============================================================
+   * W3 新组件 · 403 权限矩阵（fb-，12 屏 × 6 角色）：整体横向滚动
+   * ============================================================ */
+  #app .fb-matrix {
+    overflow-x: auto;
+  }
+
+  #app .fb-matrix__head,
+  #app .fb-matrix__row {
+    min-width: 600px;
+  }
+
+  /* ============================================================
+   * W3 新组件 · 动作弹层 / 搜索浮层 / 通知 Drawer
+   * ============================================================ */
+  body .w-modal .w-modal__panel,
+  body .w-drawer .w-drawer__panel,
+  body .gs .gs__panel {
+    max-width: calc(100vw - 32px);
+  }
+}
+
+/* =========================================================================
+ * ≤899 · 平板竖屏 / 小窗口（768–899）
+ * ========================================================================= */
+@media (max-width: 899px) {
+  :root {
+    --layout-sidebar-w: 64px;
+    --layout-topbar-h: 50px;
+    --layout-stage-pad: 12px 14px 18px;
+    --layout-copilot-rail-w: 152px;
+  }
+
+  /* ---------------- 侧栏降级为图标栏：只保留图标 + 深色底 ---------------- */
+  #app .w-sidebar {
+    padding: 12px 6px 10px;
+    align-items: stretch;
+  }
+
+  #app .w-sidebar__brand {
+    justify-content: center;
+    padding: 2px 0 12px;
+  }
+
+  #app .w-sidebar__brand-text,
+  #app .w-sidebar__project,
+  #app .w-sidebar__group-label,
+  #app .w-sidebar__item-label,
+  #app .w-sidebar__item-badge,
+  #app .w-sidebar__foot {
+    display: none;
+  }
+
+  #app .w-sidebar__group {
+    margin-bottom: 4px;
+  }
+
+  #app .w-sidebar__item {
+    justify-content: center;
+    gap: 0;
+    height: 36px;
+    padding: 0;
+    margin-bottom: 2px;
+  }
+
+  #app .w-sidebar__item.is-active::before {
+    top: 7px;
+    bottom: 7px;
+  }
+
+  /* ---------------- 顶栏：搜索只留图标、面包屑只留当前页、隐藏次要副标题 ---------------- */
+  #app .w-topbar__search {
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  #app .w-topbar__search-text {
+    display: none;
+  }
+
+  #app .w-topbar__crumb-item:not(:last-of-type),
+  #app .w-topbar__crumb-sep {
+    display: none;
+  }
+
+  #app .w-topbar__crumb-item {
+    max-width: 190px;
+  }
+
+  /* 「Java API」状态徽标只留状态点，文字挪进 title（组件已带 title） */
+  #app .api-status > span {
+    display: none;
+  }
+
+  #app .api-status {
+    padding: 0 7px;
+  }
+
+  /* 角色切换：隐藏项目副标题，保留头像 + 角色名 */
+  #app .w-topbar__trigger-sub {
+    display: none;
+  }
+
+  /* ---------------- 双栏屏改单列 ---------------- */
+  #app .desk {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #app .desk__ctx {
+    grid-column: auto;
+  }
+
+  #app .gr-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #app .cop__toolbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  #app .cop__rail-head {
+    display: none;
+  }
+
+  /* 表单/树形左侧小栏在窄屏不再固定宽度 */
+  #app .mapping__split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* =========================================================================
+ * ≤767 · 小屏（最小实测档 768×900）
+ * ========================================================================= */
+@media (max-width: 767px) {
+  :root {
+    --layout-sidebar-w: 56px;
+    --layout-topbar-h: 48px;
+    --layout-stage-pad: 10px 12px 16px;
+    --layout-copilot-rail-w: 136px;
+  }
+
+  /* ---------------- 顶栏：项目切换只留状态点 ---------------- */
+  #app .w-topbar {
+    gap: 6px;
+    padding: 0 10px;
+  }
+
+  #app .w-topbar__switch:has(.w-topbar__dot) .w-topbar__trigger-label {
+    display: none;
+  }
+
+  #app .w-topbar__switch:has(.w-topbar__dot) .w-topbar__trigger {
+    padding: 0 7px;
+  }
+
+  #app .w-topbar__crumb-item {
+    max-width: 150px;
+  }
+
+  #app .w-topbar__trigger-label {
+    max-width: 96px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ---------------- 栅格全部堆叠 / 收紧 ---------------- */
+  #app .ovw-caps,
+  #app .ovw-erps,
+  #app .ovw-roadmap,
+  #app .ovw-loops,
+  #app .ovw-methods {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #app .prg-row {
+    grid-template-columns: 34px 12px minmax(0, 1fr) 84px;
+    gap: 6px;
+  }
+
+  #app .prg-sum,
+  #app .prg-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #app .erp__stats,
+  #app .erp__conns,
+  #app .billing__stats,
+  #app .kb__stats,
+  #app .dash__stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #app .erp__detail-grid,
+  #app .trace__qa,
+  #app .trace__answer-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Copilot 工作区内的栅格：pane 已不足 320px，全部单列 */
+  #app .cop-grid-2,
+  #app .cop-grid-3,
+  #app .cop-qgrid,
+  #app .kb-meta,
+  #app .dl-stats,
+  #app .pf-grid,
+  #app .gr-grid,
+  #app .sum-grid,
+  #app .bd-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* ---------------- 向导：步骤条 2 列、选项栅格单列、矩阵继续横向滚动 ---------------- */
+  #app .cwz-grid--2,
+  #app .cwz-grid--3,
+  #app .cwz-grid--5 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #app .cwz-row {
+    min-width: 520px;
+  }
+
+  #app .cwz-body {
+    padding: 10px 12px;
+  }
+
+  /* ---------------- 403 矩阵：保留全部 6 角色列，靠滚动查看 ---------------- */
+  #app .fb-matrix__head,
+  #app .fb-matrix__row {
+    min-width: 560px;
+  }
+
+  /* ---------------- 弹层：max-width 收敛到 100vw-24px，页脚按钮换行 ---------------- */
+  body .w-modal {
+    padding: 12px;
+  }
+
+  body .w-modal .w-modal__panel,
+  body .w-drawer .w-drawer__panel,
+  body .gs .gs__panel {
+    max-width: calc(100vw - 24px);
+  }
+
+  body .w-modal .w-modal__body,
+  body .w-drawer .w-drawer__body {
+    padding: 12px 14px;
+  }
+
+  body .w-modal .w-modal__foot,
+  body .w-drawer .w-drawer__foot {
+    flex-wrap: wrap;
+    padding: 10px 14px;
+  }
+
+  body .gs {
+    padding: 6vh 12px 12px;
+  }
+
+  body .gs .gs__panel {
+    max-height: 84vh;
+  }
+
+  /* 搜索浮层底部快捷键提示在触屏/窄屏无意义，隐藏后只留过滤说明与条数 */
+  body .gs .gs__keys {
+    display: none;
+  }
+
+  body .gs .gs__foot {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  /* ---------------- 文本兜底：页头标题/说明不裁切 ---------------- */
+  #app .w-page-header__title {
+    overflow-wrap: anywhere;
+  }
+
+  #app .w-page-header__desc {
+    max-width: none;
+  }
+
+  #app .w-page {
+    min-width: 0;
+  }
+}
+
+/* =========================================================================
+ * 降级说明（写进报告，非样式）
+ * - ≤899：侧栏仅图标；项目切换保留；角色切换保留头像+角色名。
+ * - ≤767：项目切换只留状态点（仍可展开菜单）；全局搜索只留放大镜入口。
+ * - 表格/连接器矩阵/权限矩阵/向导能力矩阵：容器内横向滚动，不裁列。
+ * ========================================================================= */

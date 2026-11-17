@@ -1,0 +1,17 @@
+{
+  "name": "property-ai-customer-service",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.9.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @property/web dev",
+    "dev:server": "apps\\server-java\\mvnw.cmd -f apps/server-java/pom.xml spring-boot:run",
+    "build:server": "apps\\server-java\\mvnw.cmd -f apps/server-java/pom.xml -DskipTests package",
+    "test:server": "apps\\server-java\\mvnw.cmd -f apps/server-java/pom.xml test",
+    "check:arch": "node scripts/check-architecture.mjs",
+    "check:contract": "python scripts/check-contract.py",
+    "build": "pnpm -r build && pnpm build:server",
+    "test": "pnpm check:arch && pnpm check:contract && pnpm -r test && pnpm test:server",
+    "test:e2e": "pnpm --filter @property/tests test:e2e"
+  }
+}

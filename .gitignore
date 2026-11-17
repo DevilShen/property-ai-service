@@ -1,0 +1,126 @@
+# ---------- 依赖与构建产物 ----------
+node_modules/
+dist/
+dist-*/
+target/
+build/
+coverage/
+*.tsbuildinfo
+.pnpm-store/
+.pnpm-debug.log*
+
+# ---------- 运行时数据（含 mock 落盘、RAG 索引、审计缓存） ----------
+.data/
+**/.data/
+services/**/.data/
+scripts/results/
+chroma/
+chroma_db/
+*.sqlite3
+*.sqlite
+*.wal
+*.shm
+
+# ---------- 测试/审计运行产物 ----------
+.playwright/
+test-results/
+tests/audit/results/**/*.zip
+tests/audit/results/**/trace*
+tests/audit/results/**/*.png
+tmp/
+temp/
+*.tmp
+
+# ---------- 日志 ----------
+*.log
+logs/
+_dev/reports/logs/
+tests/audit/results/**/*.log
+
+# ---------- 环境与密钥（绝不入库） ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+.secrets/
+
+# ---------- 大体积媒体/截图（演示证据保留在本地，不入库） ----------
+*.webm
+*.mp4
+*.mov
+_dev/screenshots/
+原型截图/
+docs/demo/video/
+*.psd
+*.ai
+*.zip
+*.7z
+*.rar
+
+# ---------- 编辑器/系统 ----------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# ---------- 工具/临时目录 ----------
+_tools/
+_acl_recovery/
+_tmp*/
+# ---------- 旧版本/遗留（仅本地参考，不入库） ----------
+_legacy/
+tests/rag/results/
+tests/audit/results/
+
+
+# ---------- 交付资料/计划/截图等：仅保留在本地 ----------
+_dev/
+_mvp/
+_构建脚本/
+_plan/
+docs/plan/
+docs/prod/
+docs/demo/
+_design/*
+!_design/02-架构设计.md
+*.pdf
+*.docx
+*.xlsx
+物业AI客服原型.html
+原型说明.md
+分阶段开发方案.md
+微信交互能力与合规确认.md
+模型网关500排查.md
+mock/
+物业AI客服原型总览.png
+
+# ---------- 用户指定：以下内容仅本地保留，不入库 ----------
+AGENTS.md
+开发进度方案.md
+docs/
+_design/
+
+# ---------- 用户指定：仅保留核心业务代码，其余交付资产不入库 ----------
+apps/miniprogram/
+apps/server-java/src/test/
+tests/
+scripts/
+services/ai-orchestrator/tests/
+services/ai-orchestrator/test_smoke.py
+services/ai-orchestrator/rag/corpus/
+services/mock-erp/
+services/mock-erp-kingdee/
+services/mock-channel/
+apps/web/src/**/*.spec.ts

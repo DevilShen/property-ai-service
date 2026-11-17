@@ -1,0 +1,723 @@
+/* 01 方案总览样式（全局，前缀 ovw-；仅本屏使用） */
+
+.ovw-hero {
+  position: relative;
+  display: flex;
+  gap: 20px;
+  padding: 18px 20px;
+  border-radius: var(--rd-xl);
+  background: linear-gradient(120deg, #0b2b32, #0c3f41 58%, #0b4b44);
+  color: #cfe8e3;
+  overflow: hidden;
+  flex: none;
+}
+
+.ovw-hero::after {
+  content: '';
+  position: absolute;
+  top: -70px;
+  right: -40px;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(44, 195, 164, 0.24), transparent 66%);
+  pointer-events: none;
+}
+
+.ovw-hero__main {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+}
+
+.ovw-kicker {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: #6fe3c8;
+  text-transform: uppercase;
+}
+
+.ovw-hero__title {
+  margin-top: 5px;
+  max-width: 720px;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #fff;
+}
+
+.ovw-hero__title em {
+  font-style: normal;
+  color: #6fe3c8;
+}
+
+.ovw-hero__desc {
+  margin-top: 6px;
+  max-width: 720px;
+  font-size: 11.5px;
+  line-height: 1.75;
+  color: #9fc4be;
+}
+
+.ovw-hstats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-top: 12px;
+}
+
+.ovw-hstats b {
+  display: block;
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: #fff;
+}
+
+.ovw-hstats span {
+  font-size: 9.5px;
+  color: #8fbfb7;
+}
+
+.ovw-mock {
+  position: relative;
+  z-index: 1;
+  width: 268px;
+  flex: none;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--rd-lg);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.ovw-mock__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.ovw-mock__row span {
+  color: #8fbfb7;
+}
+
+.ovw-mock__row b {
+  margin-left: auto;
+  color: #e6f7f2;
+  font-weight: 500;
+}
+
+.ovw-mock__line {
+  height: 1px;
+  margin: 8px 0;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.ovw-mock__cap {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--rd-sm);
+  background: rgba(44, 195, 164, 0.12);
+  border: 1px solid rgba(44, 195, 164, 0.24);
+  font-size: 10px;
+}
+
+.ovw-mock__cap span {
+  color: #9fc4be;
+}
+
+.ovw-mock__cap b {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6fe3c8;
+  letter-spacing: 0.3px;
+}
+
+.ovw-mock__logos {
+  display: flex;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.ovw-mock__logos i {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 22px;
+  border-radius: var(--rd-xs);
+  color: #fff;
+  font-size: 8.5px;
+  font-style: normal;
+}
+
+/* ---------- 六层架构 ---------- */
+.ovw-arch {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ovw-layer {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--rd-md);
+  cursor: pointer;
+  transition: background-color var(--tr-fast), border-color var(--tr-fast);
+  text-align: left;
+  width: 100%;
+  background: transparent;
+  color: inherit;
+}
+
+.ovw-layer:hover {
+  background: var(--c-bg-2);
+  border-color: var(--c-line-2);
+}
+
+.ovw-layer:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-ring);
+}
+
+.ovw-layer.is-on {
+  background: var(--c-bg-2);
+  border-color: var(--c-line);
+}
+
+.ovw-layer__label b {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--c-ink-2);
+}
+
+.ovw-layer__label span {
+  display: block;
+  margin-top: 1px;
+  font-size: 9px;
+  color: var(--c-faint);
+  line-height: 1.4;
+}
+
+.ovw-layer.is-hot .ovw-layer__label b {
+  color: var(--c-brand);
+}
+
+.ovw-cells {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ovw-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 5px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--rd-md);
+  background: var(--c-bg-2);
+  color: var(--c-ink-2);
+  font-size: 10px;
+  text-align: center;
+  line-height: 1.3;
+}
+
+.ovw-cell.is-ai {
+  border-color: #ddd9fb;
+  background: var(--c-ai-soft);
+  color: #4338ca;
+}
+
+.ovw-cell.is-hot {
+  border-color: #cde4dd;
+  background: var(--c-brand-soft);
+  color: var(--c-brand-deep);
+  font-weight: 500;
+}
+
+.ovw-cell.is-data {
+  border-color: #d7e3ea;
+  background: #f1f7f9;
+  color: #31566b;
+}
+
+.ovw-cell.is-erp {
+  border-color: var(--c-line);
+  background: #f4f7f9;
+}
+
+.ovw-arrow {
+  display: grid;
+  place-items: center;
+  height: 14px;
+  color: var(--c-faint);
+}
+
+.ovw-layer-detail {
+  margin: 2px 0 6px;
+  padding: 7px 10px 7px 12px;
+  border-left: 2px solid var(--c-brand);
+  border-radius: 0 var(--rd-sm) var(--rd-sm) 0;
+  background: var(--c-brand-soft);
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: var(--c-ink-2);
+}
+
+/* ---------- 18 项能力 ---------- */
+.ovw-caps {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.ovw-cap {
+  padding: 8px 9px;
+  border: 1px solid var(--c-line-2);
+  border-radius: var(--rd-md);
+  background: var(--c-bg-2);
+}
+
+.ovw-cap__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ovw-cap__head b {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--c-ink-2);
+}
+
+.ovw-cap__head .w-tag {
+  margin-left: auto;
+}
+
+.ovw-cap__code {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--c-faint);
+}
+
+/* ---------- 5 套 ERP ---------- */
+.ovw-erps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ovw-erp {
+  padding: 10px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--rd-lg);
+  background: var(--c-card);
+  box-shadow: var(--sh-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--tr-fast), box-shadow var(--tr-fast), border-color var(--tr-fast);
+}
+
+.ovw-erp:hover {
+  transform: translateY(-1px);
+  border-color: #bbd8cf;
+  box-shadow: var(--sh-md);
+}
+
+.ovw-erp:focus-visible {
+  outline: none;
+  box-shadow: var(--sh-ring);
+}
+
+.ovw-erp__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.ovw-erp__head b {
+  font-size: 11.5px;
+  color: var(--c-ink-2);
+}
+
+.ovw-erp__head .w-tag {
+  margin-left: auto;
+}
+
+.ovw-erp__access {
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--c-faint);
+}
+
+.ovw-erp__coverage {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 9.5px;
+  color: var(--c-muted);
+}
+
+.ovw-erp__coverage b {
+  font-size: 12px;
+  color: var(--c-ink-2);
+}
+
+.ovw-erp__bar {
+  height: 4px;
+  margin-top: 4px;
+  border-radius: var(--rd-pill);
+  background: var(--c-line-2);
+  overflow: hidden;
+}
+
+.ovw-erp__bar i {
+  display: block;
+  height: 100%;
+  border-radius: var(--rd-pill);
+  background: linear-gradient(90deg, #12a48c, #0a7a66);
+}
+
+.ovw-erp__bar i.is-warn {
+  background: linear-gradient(90deg, #e8b25c, #c98a2e);
+}
+
+.ovw-erp__bar i.is-off {
+  background: #c9d6dc;
+}
+
+/* ---------- 三条闭环 ---------- */
+.ovw-loops {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ovw-loop {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--rd-lg);
+  background: var(--c-card);
+  box-shadow: var(--sh-sm);
+}
+
+.ovw-loop__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+.ovw-loop__no {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--c-brand-soft);
+  color: var(--c-brand);
+  font-size: 9.5px;
+}
+
+.ovw-loop__desc {
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: var(--c-muted);
+}
+
+.ovw-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.ovw-chain span {
+  padding: 2px 6px;
+  border: 1px solid var(--c-line-2);
+  border-radius: var(--rd-xs);
+  background: var(--c-bg-2);
+  font-size: 9px;
+  color: var(--c-ink-2);
+}
+
+.ovw-chain i {
+  color: var(--c-faint);
+  font-style: normal;
+  font-size: 9px;
+}
+
+.ovw-loop__split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.ovw-loop__split div {
+  padding: 6px 8px;
+  border-radius: var(--rd-sm);
+  background: var(--c-bg-2);
+  font-size: 9.5px;
+  line-height: 1.55;
+  color: var(--c-muted);
+}
+
+.ovw-loop__split b {
+  display: block;
+  margin-bottom: 1px;
+  font-size: 9.5px;
+  color: var(--c-ink-2);
+}
+
+/* ---------- 接入方式 ---------- */
+.ovw-methods {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ovw-method {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--c-line);
+  border-radius: var(--rd-lg);
+  background: var(--c-card);
+  box-shadow: var(--sh-sm);
+}
+
+.ovw-method__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: var(--rd-md);
+  background: var(--c-brand-soft);
+  color: var(--c-brand);
+}
+
+.ovw-method h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--c-ink-2);
+}
+
+.ovw-method p {
+  margin-top: 3px;
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: var(--c-muted);
+}
+
+.ovw-method__meta {
+  margin-top: 4px;
+  font-size: 9px;
+  color: var(--c-faint);
+}
+
+/* ---------- 90 天路线 ---------- */
+.ovw-roadmap {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ovw-step {
+  position: relative;
+  padding: 10px;
+  border: 1px solid var(--c-line-2);
+  border-radius: var(--rd-md);
+  background: var(--c-bg-2);
+}
+
+.ovw-step::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #12a48c, #0a7a66);
+  opacity: 0.6;
+}
+
+.ovw-step span {
+  display: block;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--c-brand);
+}
+
+.ovw-step b {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--c-ink-2);
+}
+
+.ovw-step p {
+  margin-top: 2px;
+  font-size: 9.5px;
+  line-height: 1.55;
+  color: var(--c-muted);
+}
+
+/* ---------- 指标 ---------- */
+.ovw-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ovw-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--c-line-2);
+  border-radius: var(--rd-md);
+  background: var(--c-bg-2);
+}
+
+.ovw-metric b {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--c-brand);
+  white-space: nowrap;
+}
+
+.ovw-metric div {
+  min-width: 0;
+}
+
+.ovw-metric span {
+  display: block;
+  font-size: 10.5px;
+  color: var(--c-ink-2);
+}
+
+.ovw-metric small {
+  display: block;
+  font-size: 9px;
+  color: var(--c-faint);
+}
+
+/* ---------- 原则 ---------- */
+.ovw-principles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ovw-principle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid var(--c-line-2);
+  border-radius: var(--rd-pill);
+  background: var(--c-bg-2);
+  font-size: 10px;
+  color: var(--c-muted);
+}
+
+.ovw-principle b {
+  color: var(--c-brand);
+  font-weight: 600;
+}
+
+/* ---------- ERP 弹窗 ---------- */
+.ovw-erp-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ovw-erp-detail__row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 7px 9px;
+  border: 1px solid var(--c-line-2);
+  border-radius: var(--rd-sm);
+  background: var(--c-bg-2);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--c-ink-2);
+}
+
+/* ---------- 汇报 Markdown 预览 ---------- */
+.ovw-report {
+  max-height: 320px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--c-line-2);
+  border-radius: var(--rd-md);
+  background: var(--c-bg-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: var(--c-ink-2);
+  white-space: pre-wrap;
+  overflow-y: auto;
+}
+
+@media (max-width: 1439px) {
+  .ovw-caps {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .ovw-erps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ovw-mock {
+    display: none;
+  }
+}
+
+@media (max-width: 1279px) {
+  .ovw-cells {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ovw-loops,
+  .ovw-methods {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ovw-roadmap {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ovw-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

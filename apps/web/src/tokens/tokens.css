@@ -1,0 +1,135 @@
+/**
+ * 设计 token（CSS 侧，唯一色彩/尺寸来源）
+ * 与 src/tokens/index.ts 保持同一组数值。
+ *
+ * 主色来自原型：深绿、深色文字、浅底；#0A6B5B 为 P1 定稿品牌绿。
+ * 组件内禁止硬编码色值/尺寸，统一 var(--*)。
+ */
+:root {
+  /* ---------- 品牌 ---------- */
+  --c-brand: #0a6b5b;
+  --c-brand-alt: #0a7a66;
+  --c-brand-hover: #0b7a68;
+  --c-brand-active: #085747;
+  --c-brand-soft: #e6f4f0;
+  --c-brand-deep: #075e50;
+  --c-brand-ring: rgba(10, 107, 91, 0.28);
+  --c-brand-gradient: linear-gradient(140deg, #16b79b, #0a7a66);
+
+  /* ---------- 中性色 ---------- */
+  --c-ink: #0e1d2b;
+  --c-ink-2: #31465a;
+  --c-muted: #6b7f90;
+  --c-faint: #94a6b5;
+  --c-line: #e3e9ed;
+  --c-line-2: #edf1f4;
+  --c-bg: #f3f7f8;
+  --c-bg-2: #f8fafb;
+  --c-card: #ffffff;
+
+  /* ---------- 语义色 ---------- */
+  --c-ai: #4f46e5;
+  --c-ai-soft: #eeedfd;
+  --c-blue: #2563eb;
+  --c-blue-soft: #eaf1fe;
+  --c-amber: #b45309;
+  --c-amber-soft: #fdf2e3;
+  --c-red: #c62828;
+  --c-red-soft: #fcebea;
+  --c-purple: #7c3aed;
+  --c-purple-soft: #f3edfe;
+  --c-success: #0f9d6e;
+  --c-success-soft: #e8f7f1;
+
+  /* ---------- 侧边栏深色 ---------- */
+  --c-nav-start: #0c1e29;
+  --c-nav-mid: #0a1721;
+  --c-nav-end: #0b1b26;
+  --c-nav-text: #afc2cd;
+  --c-nav-text-strong: #eaf3f6;
+  --c-nav-label: #5a7482;
+  --c-nav-icon: #77919f;
+  --c-nav-hover: rgba(255, 255, 255, 0.055);
+  --c-nav-active: linear-gradient(90deg, rgba(18, 164, 140, 0.24), rgba(18, 164, 140, 0.08));
+  --c-nav-accent: #2bd9b4;
+
+  /* ---------- 间距（4px 基准） ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* ---------- 圆角 ---------- */
+  --rd-xs: 4px;
+  --rd-sm: 6px;
+  --rd-md: 8px;
+  --rd-lg: 12px;
+  --rd-xl: 14px;
+  --rd-2xl: 18px;
+  --rd-pill: 999px;
+
+  /* ---------- 阴影 ---------- */
+  --sh-sm: 0 1px 2px rgba(14, 29, 43, 0.04);
+  --sh-md: 0 1px 2px rgba(14, 29, 43, 0.04), 0 6px 20px rgba(14, 29, 43, 0.05);
+  --sh-lg: 0 18px 50px rgba(14, 29, 43, 0.13);
+  --sh-ring: 0 0 0 3px var(--c-brand-ring);
+
+  /* ---------- 字体 ---------- */
+  --font-sans: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", "SFMono-Regular", monospace;
+  --fs-2xs: 10px;
+  --fs-xs: 10.5px;
+  --fs-sm: 11.5px;
+  --fs-base: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 19px;
+  --fs-2xl: 24px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --lh-tight: 1.25;
+  --lh-base: 1.5;
+  --lh-loose: 1.7;
+
+  /* ---------- 布局 ---------- */
+  --layout-sidebar-w: 236px;
+  --layout-topbar-h: 56px;
+  --layout-stage-pad: 18px 22px 24px;
+  --layout-content-max: 1440px;
+  --layout-copilot-rail-w: 208px;
+
+  /* ---------- 动效 ---------- */
+  --tr-fast: 140ms cubic-bezier(0.4, 0, 0.2, 1);
+  --tr-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ---------- 层级 ---------- */
+  --z-nav: 10;
+  --z-dropdown: 50;
+  --z-overlay: 100;
+  --z-modal: 110;
+  --z-toast: 200;
+}
+
+/**
+ * 深色主题占位：W1 只提供 token 与最小覆盖，
+ * W4 做响应式/视觉统一时再补组件级细节（原型未提供深色稿）。
+ */
+[data-theme='dark'] {
+  --c-ink: #e8eef2;
+  --c-ink-2: #c3d2db;
+  --c-muted: #94a6b5;
+  --c-faint: #718793;
+  --c-line: #23343f;
+  --c-line-2: #1b2a34;
+  --c-bg: #0b1820;
+  --c-bg-2: #10212b;
+  --c-card: #132531;
+  --sh-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.28);
+  --sh-lg: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
