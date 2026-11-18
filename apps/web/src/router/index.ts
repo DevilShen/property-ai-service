@@ -23,6 +23,14 @@ declare module 'vue-router' {
      * 用于「非 12 屏导航页」按能力码守卫（如 `/rag` 需要 `rag.query`）。
      */
     requiresCapability?: string
+    /**
+     * 跳过「12 屏 × 角色」路径可见性兜底（默认 false）。
+     * 仅用于**落在某个导航前缀下、但不属于该屏**的非导航子页：如 `/knowledge/import`
+     * 路径以 `/knowledge` 开头，而 `/knowledge` 在 12 屏矩阵里不含 agent（agent 却有
+     * `knowledge.import` 能力）→ 该页改由 `requiresCapability` 能力码判定准入。
+     * 不放宽 12 屏本身的可见性矩阵（`app/screens.ts` 基线不变）。
+     */
+    skipScreenVisibility?: boolean
   }
 }
 
@@ -141,6 +149,26 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '知识秒查', eyebrow: 'P6 · RAG', requiresCapability: 'rag.query' },
       },
       {
+        // P6 W34 知识导入独立页（**非 12 屏导航页**，沿用 `/complaints`、`/events`、`/rag` 的非导航路由先例；
+        // lead 授权 task-88 +1 条路由，不改 `app/screens.ts` 的 12 屏基线）。
+        // 为什么需要它：`knowledge.import` 能力含 agent/steward/supervisor/it/admin，但 12 屏矩阵里
+        // `/knowledge` 只对 steward/supervisor/it/admin 开放 → **agent 有导入能力却点不到入口**。
+        // 本页与知识页「导入」页签渲染同一个 `KnowledgeImportPanel`（不复制实现、共用同一 API），
+        // 入口：RAG 拒答卡「补充这条知识」（跳 `/knowledge/import?gap=<问题>`，来源 badcase）、
+        // 知识页页头「知识导入页」按钮；不新增侧栏菜单。能力门槛 `knowledge.import` 只做前端兜底，
+        // 真实 403 由 Java BFF 判定；路径以 `/knowledge` 开头但**不属于**知识运营屏，
+        // 故 `skipScreenVisibility` 让准入只看能力码（不放宽 12 屏矩阵）。
+        path: '/knowledge/import',
+        name: 'knowledge-import',
+        component: () => import('@/views/knowledge/KnowledgeImportView.vue'),
+        meta: {
+          title: '知识导入',
+          eyebrow: 'P6 · 知识导入',
+          requiresCapability: 'knowledge.import',
+          skipScreenVisibility: true,
+        },
+      },
+      {
         path: '/ui-kit',
         name: 'ui-kit',
         component: () => import('@/views/system/UiKitView.vue'),
@@ -203,15 +231,17 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { returnTo: to.fullPath } }
   }
 
-  // 非导航页的能力门槛（如 `/rag` 需要 `rag.query`）：前端只做入口兜底，
-  // 缺失能力 → /forbidden（说明所需能力），真实数据由 Java BFF 403 拦截。
+  // 非导航页的能力门槛（如 `/rag` 需要 `rag.query`、`/knowledge/import` 需要 `knowledge.import`）：
+  // 前端只做入口兜底，缺失能力 → /forbidden（说明所需能力），真实数据由 Java BFF 403 拦截。
   const requiredCapability = to.meta.requiresCapability
   if (requiredCapability && !roleHasCapability(auth.role, requiredCapability)) {
     return { name: 'forbidden', query: { from: to.fullPath } }
   }
 
+  // 12 屏可见性兜底。`skipScreenVisibility` 的页面（如 `/knowledge/import`）路径落在导航前缀下
+  // 但不属于该屏（`/knowledge` 不含 agent），准入只看上面的能力码，避免 agent 被可见性矩阵误拦。
   const app = useAppStore()
-  if (!canAccess(app.currentRole, to.path)) {
+  if (!to.meta.skipScreenVisibility && !canAccess(app.currentRole, to.path)) {
     return { name: 'forbidden', query: { from: to.fullPath } }
   }
   return true

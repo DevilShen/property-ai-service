@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { WButton, WCard, WEmpty, WLoading, WModal, WPageHeader, WTabs, WTable, WTag, useToast } from '@/components'
 import PermissionDenied from '@/components/feedback/PermissionDenied.vue'
 import { RagAskPanel, RagHealthPanel } from '@/components/rag'
@@ -77,14 +77,16 @@ import {
 const screen = SCREENS.knowledge
 const auth = useAuthStore()
 const toast = useToast()
-
+const router = useRouter()
 const PAGE_SIZE = 10
 
 /* ============================================== ⓪ 页签（P6 W33 RAG 增量） */
 /**
- * 页签（**不改 12 屏导航矩阵**：RAG 问答/健康/知识导入挂在知识页内，不新增路由）：
+ * 页签（**不改 12 屏导航矩阵**：RAG 问答/健康/知识导入挂在知识页内，不新增 12 屏导航项）：
  * - `ops`：原知识运营视图（列表/详情/变更/审核/采纳看板），默认页签，DOM 与既有断言完全一致；
  * - `import`：知识导入（P6 W34 task-87；`knowledge.import` 才显示；粘贴/上传/ZIP → 预览 → 提交待审/直审）；
+ *   task-88 起页头另有「知识导入页」入口 → 非导航路由 `/knowledge/import`（同一组件/同一 API，
+ *   供 12 屏矩阵里看不到本屏、但有 `knowledge.import` 能力的 agent 使用；本页签保留、staff 现状不变）；
  * - `ask`：知识秒查 RAG（`POST /api/v1/rag/query`：answer + `[n]` 引用 + 来源卡片 + 拒答 + 五态）；
  * - `health`：RAG 链路健康（`GET /api/v1/rag/health`，**仅 it/admin**；能力码 `rag.health` 来自
  *   `auth/capabilities.ts` 既有矩阵，前端只做入口显隐，真实 403 边界在 Java）。
@@ -610,8 +612,10 @@ function queryText(value: unknown): string {
 }
 
 /**
- * 页签深链口径：`/knowledge?tab=import&gap=<问题>`（`RagAskPanel` 拒答卡「补充这条知识」跳转；
- * 不新增路由、不改 12 屏基线）。tab 只接受当前角色可见的页签，gap 只作为预填文本（≤200 字符）。
+ * 页签深链口径：`/knowledge?tab=import&gap=<问题>`（**保留兼容**：旧书签/旧链接仍可用；
+ * task-88 起 `RagAskPanel` 拒答卡「补充这条知识」改跳非导航路由 `/knowledge/import?gap=`
+ * ——因为 `knowledge.import` 含 agent 而本屏可见性矩阵不含 agent，页签对 agent 不可达）。
+ * tab 只接受当前角色可见的页签，gap 只作为预填文本（≤200 字符）。
  */
 function applyRouteQuery(): void {
   const tab = queryText(route.query.tab)
@@ -633,6 +637,15 @@ function openKnowledgeFromImport(knowledgeId?: string): void {
   selectedId.value = id
   void loadDetail(id)
   toast.info(`已切到运营视图并读取知识 ${id} 详情`)
+}
+
+/**
+ * 知识页头入口 → 非导航路由 `/knowledge/import`（task-88）。
+ * 与本页签是同一 `KnowledgeImportPanel` 与同一套 API；页签保留（staff/it/admin 现状不变），
+ * 另开独立页是为了让 12 屏矩阵看不到本屏的 agent 也能直达导入（能力 knowledge.import 准入）。
+ */
+function openImportPage(): void {
+  void router.push('/knowledge/import')
 }
 
 watch(
@@ -704,6 +717,16 @@ const sourceText = computed(() => {
       <template #actions>
         <WTag tone="g" plain>知识来自 API · 前端不编造</WTag>
         <WButton size="sm" icon="refresh" data-testid="kb-refresh" @click="refreshAll">刷新</WButton>
+        <WButton
+          v-if="canImport"
+          size="sm"
+          variant="ghost"
+          icon="arrow-right"
+          data-testid="kb-open-import-page"
+          @click="openImportPage"
+        >
+          知识导入页
+        </WButton>
         <WButton size="sm" variant="primary" icon="plus" data-testid="knowledge-create-open" @click="createOpen = true">
           新增知识
         </WButton>
