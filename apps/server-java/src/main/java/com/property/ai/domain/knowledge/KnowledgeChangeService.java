@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -73,11 +74,22 @@ public class KnowledgeChangeService {
     private final KnowledgeRepository repository;
     /** outbox 事件存储（P5-019；可选注入：保持既有单测构造不破，未注入时只记日志） */
     private EventStore eventStore;
+    /**
+     * 导入审核联动索引钩子（task-86）：由 {@code domain/knowledge/importer/KnowledgeImportService} 实现。
+     * 用 {@link ObjectProvider} 延迟解析，避免「导入服务 → 变更服务 → 导入服务」循环依赖；
+     * 未装配（单测/切片）时安全跳过，既有审核行为不变。
+     */
+    private ObjectProvider<KnowledgeIndexHook> indexHookProvider;
 
     /** 变更单（changeId → 记录） */
     private final ConcurrentMap<String, ChangeRecord> changes = new ConcurrentHashMap<>();
     /** 已生效覆盖版本（knowledgeId → 最近一次 approved 的新版本） */
     private final ConcurrentMap<String, Override> overrides = new ConcurrentHashMap<>();
+    /**
+     * 导入来源的待审变更单（changeId = knowledgeId，task-86）：审核结束时需要联动索引/状态，
+     * 非导入知识不在集合内（行为完全不变）。
+     */
+    private final java.util.Set<String> importedChanges = ConcurrentHashMap.newKeySet();
 
     private final AtomicInteger sequence = new AtomicInteger();
     private final AtomicReference<String> sequenceDay = new AtomicReference<>("");
@@ -88,6 +100,12 @@ public class KnowledgeChangeService {
     @Autowired(required = false)
     public void setEventStore(EventStore eventStore) {
         this.eventStore = eventStore;
+    }
+
+    /** 导入审核联动钩子注入（可选：task-86；单测/切片未装配时跳过联动） */
+    @Autowired(required = false)
+    public void setIndexHookProvider(ObjectProvider<KnowledgeIndexHook> indexHookProvider) {
+        this.indexHookProvider = indexHookProvider;
     }
 
     public KnowledgeChangeService(KnowledgeRepository repository) {
@@ -103,9 +121,47 @@ public class KnowledgeChangeService {
     public void resetForTest() {
         changes.clear();
         overrides.clear();
+        importedChanges.clear();
         sequence.set(0);
         sequenceDay.set("");
         clock = Clock.system(TicketTimes.BUSINESS_ZONE);
+    }
+
+    // ==================================================================
+    // 导入来源知识：登记待审变更单（task-86，契约 v1.5.0 imports ④）
+    // ==================================================================
+
+    /**
+     * 登记「导入来源知识」的待审变更单：{@code changeId = knowledgeId}。
+     *
+     * <h2>为什么 changeId 用 knowledgeId</h2>
+     * 契约要求导入的待审知识走<b>既有</b> {@code POST /api/v1/knowledge/{knowledgeId}/review} 审核，而该端点
+     * 必填 {@code changeId}；导入任务没有独立的「变更单查询端点」（{@code KnowledgeCommitResult} 只回
+     * knowledgeId/version/status，DTO 已冻结）。因此导入知识的待审变更单以 knowledgeId 作为变更单号，
+     * 审核人可直接用 {@code knowledgeId} 作为 {@code changeId} 审核，无需额外查询端点、不改契约。
+     *
+     * <p>审核通过后：生成/刷新覆盖版本（版本号沿用导入的 {@code V1.0}，不做次版本 +1——导入知识是首次发布），
+     * 并由 {@link KnowledgeIndexHook} 触发 {@code /internal/rag/index} + {@code knowledge.index} 审计。
+     */
+    public void registerImportedPending(String knowledgeId, String submittedBy, String title, String content,
+            String effectiveFrom, String effectiveTo, String reviewNote) {
+        String kid = knowledgeId == null ? "" : knowledgeId.trim();
+        if (kid.isEmpty()) {
+            return;
+        }
+        Instant now = clock.instant();
+        ChangeRecord record = new ChangeRecord(
+                kid, kid, KnowledgeChangeStatus.PENDING_REVIEW,
+                submittedBy == null || submittedBy.isBlank() ? "anonymous" : submittedBy,
+                TicketTimes.iso(now), "import", title, content, effectiveFrom, effectiveTo,
+                null, null, null, reviewNote);
+        changes.put(kid, record);
+        importedChanges.add(kid);
+    }
+
+    /** 是否为导入来源的待审变更单（诊断/测试用）。 */
+    public boolean isImportedChange(String changeId) {
+        return changeId != null && importedChanges.contains(changeId.trim());
     }
 
     // ==================================================================
@@ -249,7 +305,11 @@ public class KnowledgeChangeService {
         Instant now = clock.instant();
         String reviewedAt = TicketTimes.iso(now);
         boolean approve = request.decision() == ReviewDecision.APPROVED;
-        String newVersion = approve ? bumpVersion(currentVersion(base.knowledgeId(), base.version())) : null;
+        // task-86：导入来源知识是首次发布 → 版本沿用 V1.0（不做次版本 +1）；既有知识变更仍 +1
+        boolean imported = importedChanges.contains(change.changeId());
+        String newVersion = approve
+                ? (imported ? base.version() : bumpVersion(currentVersion(base.knowledgeId(), base.version())))
+                : null;
         ChangeRecord updated = change.reviewed(
                 approve ? KnowledgeChangeStatus.APPROVED : KnowledgeChangeStatus.REJECTED,
                 reviewer, reviewedAt, newVersion, note.isEmpty() ? null : note);
@@ -262,12 +322,48 @@ public class KnowledgeChangeService {
                     updated.submittedBy(), updated.submittedAt(), reviewer, reviewedAt,
                     note.isEmpty() ? null : note));
         }
-        log.info("[knowledge] review ok changeId={} knowledgeId={} decision={} version={} reviewer={} traceId={}",
-                updated.changeId(), updated.knowledgeId(), updated.status().value(), newVersion, reviewer, traceId);
+        log.info("[knowledge] review ok changeId={} knowledgeId={} decision={} version={} reviewer={} imported={}"
+                + " traceId={}", updated.changeId(), updated.knowledgeId(), updated.status().value(), newVersion,
+                reviewer, imported, traceId);
         if (approve) {
             publishChangedEvent(updated, newVersion, actor);
         }
+        if (imported) {
+            notifyImportedReviewed(base.knowledgeId(), approve, traceId);
+        }
         return updated.toDto();
+    }
+
+    /**
+     * 导入来源知识审核结束：通知导入域联动（approved → 触发编排层索引；rejected → 置 rejected）。
+     *
+     * <p>失败只告警，<b>不改变审核结果</b>（审核已落库）：索引失败由导入域落 {@code knowledge.index}
+     * 审计（result=failed）并保留知识 published，运营可手动重建索引。
+     */
+    private void notifyImportedReviewed(String knowledgeId, boolean approved, String traceId) {
+        ObjectProvider<KnowledgeIndexHook> provider = this.indexHookProvider;
+        if (provider == null) {
+            log.debug("[knowledge] 导入联动钩子未装配，跳过 knowledgeId={}", knowledgeId);
+            return;
+        }
+        KnowledgeIndexHook hook;
+        try {
+            hook = provider.getIfAvailable();
+        } catch (RuntimeException ex) {
+            log.warn("[knowledge] 导入联动钩子解析失败 knowledgeId={} err={}", knowledgeId,
+                    ex.getClass().getSimpleName());
+            return;
+        }
+        if (hook == null) {
+            log.debug("[knowledge] 导入联动钩子不存在，跳过 knowledgeId={}", knowledgeId);
+            return;
+        }
+        try {
+            hook.onReviewed(knowledgeId, approved, traceId);
+        } catch (RuntimeException ex) {
+            log.warn("[knowledge] 导入联动失败（审核结果不回滚）knowledgeId={} approved={} err={}", knowledgeId,
+                    approved, ex.getClass().getSimpleName());
+        }
     }
 
     /**

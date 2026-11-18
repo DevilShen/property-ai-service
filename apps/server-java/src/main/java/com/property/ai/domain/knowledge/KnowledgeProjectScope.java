@@ -2,6 +2,8 @@ package com.property.ai.domain.knowledge;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import com.property.ai.bff.dto.Actor;
 import com.property.ai.bff.dto.ActorRole;
@@ -48,7 +50,41 @@ public final class KnowledgeProjectScope {
             "K-037", Set.of("P-LVY"),   // 装修噪音投诉处理（published）
             "K-038", Set.of("P-LVY"));  // 投诉分级与首响口径（published）
 
+    /**
+     * 导入生成知识的项目归属（task-86）：{@code knowledgeId → projectId}。
+     *
+     * <p>契约知识 DTO 无 {@code projectId} 字段（不改契约），导入知识的归属只能服务端维护；
+     * 与文件演示数据的「集团继承」不同，导入知识<b>只属于创建时的项目</b>（不跨项目继承，
+     * 避免一个项目的私有材料被别的项目 RAG 召回）。P5 迁 PG 后落 {@code knowledge.project_id} 列。
+     */
+    private static final ConcurrentMap<String, String> IMPORTED = new ConcurrentHashMap<>();
+
     private KnowledgeProjectScope() {
+    }
+
+    /** 登记导入知识的项目归属（commit 生成知识时调用）。 */
+    public static void registerImported(String knowledgeId, String projectId) {
+        if (knowledgeId == null || knowledgeId.isBlank() || projectId == null || projectId.isBlank()) {
+            return;
+        }
+        IMPORTED.put(knowledgeId.trim(), projectId.trim());
+    }
+
+    /** 撤销导入知识的项目登记（仅直审索引失败回滚用）。 */
+    public static void unregisterImported(String knowledgeId) {
+        if (knowledgeId != null && !knowledgeId.isBlank()) {
+            IMPORTED.remove(knowledgeId.trim());
+        }
+    }
+
+    /** 导入知识的项目归属（非导入知识/未登记返回 null）。 */
+    public static String importedProjectOf(String knowledgeId) {
+        return knowledgeId == null || knowledgeId.isBlank() ? null : IMPORTED.get(knowledgeId.trim());
+    }
+
+    /** 演示/测试重置（生产实现不调用）。 */
+    public static void clearImportedForTest() {
+        IMPORTED.clear();
     }
 
     /** 演示项目 ID（与 {@code ProjectService} / shared {@code DEMO_PROJECTS} 一致） */
@@ -58,6 +94,11 @@ public final class KnowledgeProjectScope {
     public static boolean visibleTo(String knowledgeId, String scopeProjectId) {
         if (scopeProjectId == null || scopeProjectId.isBlank()) {
             return true;
+        }
+        // 导入生成的知识：只属于创建时的项目（不继承、不跨项目）
+        String importedProject = importedProjectOf(knowledgeId);
+        if (importedProject != null) {
+            return importedProject.equals(scopeProjectId);
         }
         if (GROUP_PROJECT_ID.equals(scopeProjectId)) {
             return true;

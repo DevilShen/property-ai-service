@@ -1,4 +1,4 @@
-import { healthCheck, metaApi, request, requestBlob, type ApiResult } from './client'
+import { healthCheck, metaApi, request, requestBlob, requestMultipart, type ApiResult } from './client'
 import { DEFAULT_RECON_SAMPLE_SIZE, KNOWLEDGE_SEARCH_DEFAULT_LIMIT } from './contract'
 import type {
   Actor,
@@ -66,7 +66,13 @@ import type {
   KnowledgeChange,
   KnowledgeChangeRequest,
   KnowledgeCategory,
+  KnowledgeCommitResult,
   KnowledgeDetail,
+  KnowledgeImportCommitRequest,
+  KnowledgeImportCreateRequest,
+  KnowledgeImportJob,
+  KnowledgeImportJobListResult,
+  KnowledgeImportJobStatus,
   KnowledgeItemStatus,
   KnowledgeListResult,
   KnowledgeReviewRequest,
@@ -151,6 +157,41 @@ export interface KnowledgeSearchQuery {
   q: string
   limit?: number
 }
+
+/* ============================================================================
+ * P6 W34（task-87）知识导入入参形状（契约 v1.5.0 §12；请求侧组合参数，不改响应契约）
+ * ========================================================================== */
+
+/** 导入任务列表入参（`GET /api/v1/knowledge/imports?status&page&pageSize`；`status` 省略 = 全部） */
+export interface KnowledgeImportListQuery extends PageQuery {
+  /** 任务状态过滤（shared `KnowledgeImportJobStatus` 全集，顺序固定） */
+  status?: KnowledgeImportJobStatus
+}
+
+/**
+ * multipart 导入的附加表单字段（`POST /api/v1/knowledge/imports` 文件分支）。
+ * - `sourceType` 缺省 = `file`（单文件）；ZIP 批量必须显式 `batch`（另需 `knowledge.import.batch`）；
+ * - `category` 取 shared `KnowledgeCategory`（11 类），非法值服务端 400 `E-1001`。
+ */
+export interface KnowledgeImportFileOptions {
+  title?: string
+  category?: KnowledgeCategory
+  sourceType?: 'file' | 'batch'
+}
+
+/**
+ * 知识导入超时（上传/解析是**同步**链路：Java 调编排层解析 ≤30s，ZIP 逐文件解析更久）。
+ * 前端取 120s 覆盖「10MB 单文件 / 50MB ZIP 多文件解析」，避免误报 E-4001；
+ * 轮询间隔 2s（`GET /imports/{jobId}` 直到 preview_ready/failed/cancelled）。
+ */
+export const KNOWLEDGE_IMPORT_UPLOAD_TIMEOUT_MS = 120_000
+export const KNOWLEDGE_IMPORT_CREATE_TIMEOUT_MS = 60_000
+export const KNOWLEDGE_IMPORT_COMMIT_TIMEOUT_MS = 60_000
+export const KNOWLEDGE_IMPORT_POLL_INTERVAL_MS = 2_000
+/** 轮询最大次数（2s × 60 = 120s；超时后页面给「超时」态，可继续手动刷新） */
+export const KNOWLEDGE_IMPORT_POLL_MAX_ATTEMPTS = 60
+/** 导入任务列表每页条数（服务端 pageSize 上限 100） */
+export const KNOWLEDGE_IMPORT_JOB_PAGE_SIZE = 10
 
 /**
  * 证据包 CSV 导出结果（P4-020，契约 v1.2.0 `traceEvidence` 的文件流例外）
@@ -318,6 +359,25 @@ export const RAG_HEALTH_TIMEOUT_MS = 12_000
  * - `mode` / `reranked` 必须如实展示（`generative|retrieval_only|rules`）：不得把仅检索/规则兜底说成生成答案；
  * - `[n]` 引用编号必须 ⊆ `sources[].index`（服务端校验；前端只做高亮/跳转，不改写编号）；
  * - `degraded` 出现时页面标注「已降级」并展示服务端原因；`traceId` 用于回溯，页面只展示不落日志。
+ *
+ * P6 W34 增量（契约 v1.5.0 §12，知识导入；task-87）：
+ * | 前端方法 | 契约端点 | 使用页面 |
+ * |---|---|---|
+ * | `api.knowledgeImport.createPaste` | POST /api/v1/knowledge/imports（JSON：title+content） | 知识页「导入」页签 · 粘贴文本 / RAG 缺口沉淀（sourceType=badcase） |
+ * | `api.knowledgeImport.createFile` | POST /api/v1/knowledge/imports（multipart：file + title/category/sourceType） | 单文件（txt/md/docx/pdf ≤10MB）/ ZIP 批量（sourceType=batch，≤50 文件/50MB） |
+ * | `api.knowledgeImport.list` | GET /api/v1/knowledge/imports?status&page&pageSize | 导入任务列表（服务端分页，仅本项目） |
+ * | `api.knowledgeImport.get` | GET /api/v1/knowledge/imports/{jobId} | 预览页 / 轮询（2s，直到 preview_ready/failed） |
+ * | `api.knowledgeImport.commit` | POST /api/v1/knowledge/imports/{jobId}/commit | 预览提交（默认 pending_review；approved 仅 it/admin 直审并即时索引） |
+ * | `api.knowledgeImport.cancel` | POST /api/v1/knowledge/imports/{jobId}/cancel | 取消任务（终态 409 E-3002） |
+ *
+ * 导入口径（契约 v1.5.0 `KnowledgeImportJob` / `KnowledgeCommitResult`）：
+ * - 权限：`knowledge.import`（steward/agent/supervisor/it/admin；owner 403）；ZIP 批量另需
+ *   `knowledge.import.batch`；`approved` 直审仅 it/admin（前端隐藏入口，服务端 403 `E-2001` 兜底）；
+ * - 限额：单文件 ≤10MB / 粘贴 ≤200,000 字符 / ZIP ≤50 文件·50MB / 10 次·分·账号
+ *   （超限 413 `E-1001`、超频 429 `E-4003`）；前端提示数字取自 shared `KNOWLEDGE_IMPORT_LIMITS`；
+ * - 预览是**同步**返回的（201 即带 chunks；解析失败也是 201 + status=failed + error），
+ *   页面仍按 2s 轮询到终态，避免把 in-flight 任务当完成；
+ * - multipart 上传不手工设 `Content-Type`（boundary 由浏览器补；`requestMultipart`）。
  *
  * 约定：
  * - 写操作（create/transition/feedback）**必须**传 `idempotencyKey`（统一由
@@ -680,6 +740,102 @@ export const api = {
       const suffix = params.toString() ? `?${params.toString()}` : ''
       return request<KnowledgeStats>(`/api/v1/knowledge/stats${suffix}`)
     },
+  },
+
+  /**
+   * P6 W34 知识导入（契约 v1.5.0 §12 / task-87；设计 `docs/design/知识导入方案.md`）
+   * -------------------------------------------------------------------------
+   * | 前端方法 | 契约端点 | 使用页面 |
+   * |---|---|---|
+   * | `api.knowledgeImport.createPaste` | POST /api/v1/knowledge/imports（application/json） | 知识页「导入」页签 · 粘贴文本 / RAG 缺口沉淀（badcase） |
+   * | `api.knowledgeImport.createFile` | POST /api/v1/knowledge/imports（multipart/form-data） | 知识页「导入」页签 · 单文件（txt/md/docx/pdf ≤10MB）/ ZIP 批量（≤50 文件/50MB） |
+   * | `api.knowledgeImport.list` | GET /api/v1/knowledge/imports?status&page&pageSize | 导入任务列表（仅本项目可见；服务端分页） |
+   * | `api.knowledgeImport.get` | GET /api/v1/knowledge/imports/{jobId} | 任务详情轮询（2s → preview_ready/failed）/ 预览页 |
+   * | `api.knowledgeImport.commit` | POST /api/v1/knowledge/imports/{jobId}/commit | 预览确认提交（默认 pending_review；approved 仅 it/admin 直审） |
+   * | `api.knowledgeImport.cancel` | POST /api/v1/knowledge/imports/{jobId}/cancel | 取消任务（pending/parsing/preview_ready；终态 409 E-3002） |
+   *
+   * 口径（前端不改写契约语义）：
+   * - 权限：`knowledge.import`（steward/agent/supervisor/it/admin）；ZIP 批量另需 `knowledge.import.batch`；
+   *   `approved` 直审**仅 it/admin**（前端隐藏 + 服务端 403 `E-2001` 兜底）；owner 创建任务 → 403；
+   * - 限额：单文件 ≤10MB、粘贴 ≤200,000 字符、ZIP ≤50 文件/50MB、10 次/分/账号（超限 413 `E-1001`、
+   *   超频 429 `E-4003`）—— 前端只做提示与预校验，真实边界在 Java（`KNOWLEDGE_IMPORT_LIMITS` 同源）；
+   * - 解析是**同步**的（201 直接带预览；解析失败也是 201 + `status=failed` + `error`），
+   *   页面仍按 2s 轮询直到 `preview_ready` / `failed`，避免把 in-flight 任务当终态；
+   * - 提交是写操作：`Idempotency-Key` 可选，页面按「动作 + 载荷」复用同键重试；
+   * - 上传/ZIP 走 multipart（`requestMultipart`，**不手工设 Content-Type**），JSON 粘贴走既有 `request`。
+   */
+  knowledgeImport: {
+    /** 粘贴文本 / RAG 缺口沉淀（JSON 分支；201 + 预览态任务） */
+    createPaste: (
+      body: KnowledgeImportCreateRequest,
+      idempotencyKey?: string,
+    ): Promise<ApiResult<KnowledgeImportJob>> =>
+      request<KnowledgeImportJob>('/api/v1/knowledge/imports', {
+        method: 'POST',
+        body,
+        timeoutMs: KNOWLEDGE_IMPORT_CREATE_TIMEOUT_MS,
+        idempotencyKey,
+      }),
+
+    /**
+     * 单文件 / ZIP 批量（multipart 分支；201 + 预览态任务）。
+     * `options.sourceType='batch'` 时按 ZIP 处理（需 `knowledge.import.batch`），
+     * 且服务端会校验 ZIP 内文件数/解压总量；非 ZIP 文件仍走白名单 txt/md/docx/pdf。
+     */
+    createFile: (
+      file: File,
+      options: KnowledgeImportFileOptions = {},
+      idempotencyKey?: string,
+    ): Promise<ApiResult<KnowledgeImportJob>> => {
+      const form = new FormData()
+      form.append('file', file, file.name)
+      if (options.title) form.append('title', options.title)
+      if (options.category) form.append('category', options.category)
+      if (options.sourceType) form.append('sourceType', options.sourceType)
+      return requestMultipart<KnowledgeImportJob>('/api/v1/knowledge/imports', form, {
+        timeoutMs: KNOWLEDGE_IMPORT_UPLOAD_TIMEOUT_MS,
+        idempotencyKey,
+      })
+    },
+
+    /** 任务列表（服务端分页；`status` 省略 = 全部；仅 actor 项目可见，跨项目 404/403） */
+    list: (query: KnowledgeImportListQuery = {}): Promise<ApiResult<KnowledgeImportJobListResult>> => {
+      const params = pageParams(query)
+      if (query.status) params.set('status', query.status)
+      const suffix = params.toString() ? `?${params.toString()}` : ''
+      return request<KnowledgeImportJobListResult>(`/api/v1/knowledge/imports${suffix}`)
+    },
+
+    /** 任务详情（非本项目任务 → 404 `E-3001`，不区分无权限与不存在） */
+    get: (jobId: string): Promise<ApiResult<KnowledgeImportJob>> =>
+      request<KnowledgeImportJob>(`/api/v1/knowledge/imports/${encodeURIComponent(jobId)}`),
+
+    /**
+     * 提交预览（写操作）：省略 `status` = `pending_review`（待审，走既有 `/knowledge/{id}/review` 审核）；
+     * `approved` 仅 it/admin（否则 403 `E-2001` `requiredCapability=knowledge.review`）；
+     * `chunks` 按 preview.seq 只导入部分块（省略/空 = 全部）；非 `preview_ready` → 409 `E-3002`。
+     */
+    commit: (
+      jobId: string,
+      body: KnowledgeImportCommitRequest = {},
+      idempotencyKey?: string,
+    ): Promise<ApiResult<KnowledgeCommitResult>> =>
+      request<KnowledgeCommitResult>(
+        `/api/v1/knowledge/imports/${encodeURIComponent(jobId)}/commit`,
+        {
+          method: 'POST',
+          body,
+          timeoutMs: KNOWLEDGE_IMPORT_COMMIT_TIMEOUT_MS,
+          idempotencyKey,
+        },
+      ),
+
+    /** 取消任务（pending/parsing/preview_ready 可取消；终态 → 409 `E-3002`；不删除已归档原文） */
+    cancel: (jobId: string): Promise<ApiResult<KnowledgeImportJob>> =>
+      request<KnowledgeImportJob>(
+        `/api/v1/knowledge/imports/${encodeURIComponent(jobId)}/cancel`,
+        { method: 'POST', body: {} },
+      ),
   },
 
   /**

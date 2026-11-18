@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { WButton, WCard, WEmpty, WIcon, WLoading, WModal, WTag, useToast } from '@/components'
 import PermissionDenied from '@/components/feedback/PermissionDenied.vue'
+import { useAuthStore } from '@/stores/auth'
 import { api, ApiError, errorNextStep, errorText, forbiddenDetailsOf } from '@/api'
 import { KNOWLEDGE_CATEGORY_LABELS } from '@/api'
 import type {
@@ -67,6 +68,10 @@ const props = withDefaults(
 
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
+
+/** P1 缺口沉淀（task-87）：有 knowledge.import 能力才给「补充这条知识」入口（owner 无导入权限，隐藏） */
+const canSupplement = computed(() => auth.hasCapability('knowledge.import'))
 
 type DeniedInfo = ForbiddenDetails & { traceId?: string }
 
@@ -245,6 +250,21 @@ function submitGap(): void {
   void router.push('/copilot/build')
 }
 
+/**
+ * P1 缺口沉淀（task-87）：把拒答问题带到知识页「导入」页签并预填
+ * （标题 = 问题、正文模板、sourceType=badcase），由责任人补充制度依据后提交待审。
+ * 不在本组件伪造知识：只做跳转 + 预填，提交仍走 `POST /api/v1/knowledge/imports`。
+ */
+function supplementKnowledge(): void {
+  const target = (askedQuestion.value || question.value).trim()
+  if (!target) {
+    toast.warning('缺少问题文本：请先提问，再从拒答结果点「补充这条知识」')
+    return
+  }
+  toast.info('正在打开知识导入页签：已预填问题标题与来源 badcase，请补充标准答案后提交待审')
+  void router.push({ path: '/knowledge', query: { tab: 'import', gap: target } })
+}
+
 function goKnowledgeCenter(): void {
   void router.push('/knowledge')
 }
@@ -408,12 +428,25 @@ function goKnowledgeCenter(): void {
           <WButton size="sm" variant="primary" icon="arrow-right" data-testid="rag-handoff" @click="handoff">
             转人工处理
           </WButton>
+          <WButton
+            v-if="canSupplement"
+            size="sm"
+            variant="secondary"
+            data-testid="rag-refusal-supplement"
+            @click="supplementKnowledge"
+          >
+            补充这条知识
+          </WButton>
           <WButton size="sm" data-testid="rag-refusal-gap" @click="submitGap">提交知识缺口</WButton>
           <WButton size="sm" variant="ghost" data-testid="rag-refusal-retry" @click="ask">重试</WButton>
         </div>
         <p class="rag-refusal__hint">
           口径：拒答不是错误（HTTP 200 + <code>answerable=false</code>）；页面不生成猜测答案，
           缺口会进入知识运营的缺口池，由责任人补知识后再纳入检索。
+          <template v-if="canSupplement">
+            「补充这条知识」会把当前问题预填到知识页「导入」页签（来源标记 badcase），
+            由责任人补充标准答案后进入待审流程。
+          </template>
         </p>
       </div>
     </WCard>

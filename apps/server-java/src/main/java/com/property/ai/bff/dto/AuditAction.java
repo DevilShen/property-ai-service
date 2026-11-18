@@ -42,7 +42,9 @@ public enum AuditAction {
     TRACE_EXPORT("trace.export"),
     GRAY_POLICY_CREATE("gray.policy.create"),
     GRAY_POLICY_UPDATE("gray.policy.update"),
-    KNOWLEDGE_REINDEX("knowledge.reindex");
+    KNOWLEDGE_REINDEX("knowledge.reindex"),
+    KNOWLEDGE_IMPORT_COMMIT("knowledge.import.commit"),
+    KNOWLEDGE_INDEX("knowledge.index");
 
     private final String value;
 

@@ -68,6 +68,8 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly string[]> = {
     'copilot.broadcast',
     'project.read',
     'rag.query',
+    'knowledge.import',
+    'knowledge.import.batch',
   ],
   agent: [
     'room.query',
@@ -97,6 +99,8 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly string[]> = {
     'desk.qa.score',
     'project.read',
     'rag.query',
+    'knowledge.import',
+    'knowledge.import.batch',
   ],
   supervisor: [
     'room.query',
@@ -134,6 +138,8 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly string[]> = {
     'project.read',
     'event.read',
     'rag.query',
+    'knowledge.import',
+    'knowledge.import.batch',
   ],
   it: [
     'mapping.read',
@@ -170,6 +176,8 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly string[]> = {
     'rag.query',
     'rag.health',
     'knowledge.reindex',
+    'knowledge.import',
+    'knowledge.import.batch',
   ],
   admin: [
     'mapping.read',
@@ -206,6 +214,8 @@ export const ROLE_CAPABILITIES: Record<ActorRole, readonly string[]> = {
     'rag.query',
     'rag.health',
     'knowledge.reindex',
+    'knowledge.import',
+    'knowledge.import.batch',
   ],
 }
 
@@ -259,6 +269,8 @@ export const CAPABILITY_LABELS: Record<string, string> = {
   'gray.policy.manage': '灰度策略管理',
   'event.read': '事件（outbox）只读',
   'observability.read': '可观测性指标/健康（平台运维）',
+  'knowledge.import': '知识导入（粘贴/文件，默认待审）',
+  'knowledge.import.batch': '知识批量导入（ZIP，≤50 文件/50MB）',
   'rag.query': '知识库 RAG 问答（带引用/拒答）',
   'rag.health': 'RAG 链路健康（平台运维）',
   'knowledge.reindex': '知识索引重建（平台运维）',

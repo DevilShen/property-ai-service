@@ -5,9 +5,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.Logger;
@@ -57,6 +60,13 @@ public class KnowledgeRepository {
     private final ObjectMapper objectMapper;
     private final String configuredPath;
     private final AtomicReference<List<Entry>> entries = new AtomicReference<>();
+    /**
+     * 导入生成的知识（task-86，契约 v1.5.0 {@code /knowledge/imports}）：进程内覆盖层，
+     * <b>不写回</b> {@code mock/data/knowledge.json}；与变更审核覆盖版本（{@code KnowledgeChangeService}）
+     * 互补——导入知识先登记在这里（draft/pending_review/published），审核通过后由覆盖版本接管读口径。
+     * 重启清空（demo 口径；P5 迁 PG 后落 {@code knowledge} 表，接口不变）。
+     */
+    private final ConcurrentMap<String, Entry> imported = new ConcurrentHashMap<>();
 
     public KnowledgeRepository(ObjectMapper objectMapper,
             @Value("${property.knowledge.path:}") String configuredPath) {
@@ -91,9 +101,17 @@ public class KnowledgeRepository {
         }
     }
 
-    /** 全部条目（只读；文件缺失/格式非法时为空列表，不抛异常）。 */
+    /** 全部条目（只读；文件缺失/格式非法时为空列表，不抛异常）。含导入生成的知识（进程内覆盖层）。 */
     public List<Entry> all() {
-        return load();
+        List<Entry> loaded = load();
+        if (imported.isEmpty()) {
+            return loaded;
+        }
+        List<Entry> merged = new ArrayList<>(loaded.size() + imported.size());
+        merged.addAll(loaded);
+        merged.addAll(imported.values());
+        merged.sort(Comparator.comparing(Entry::knowledgeId));
+        return List.copyOf(merged);
     }
 
     /** 按知识 ID 查（大小写不敏感；不过滤状态，供诊断/管理视图）。 */
@@ -102,9 +120,59 @@ public class KnowledgeRepository {
             return Optional.empty();
         }
         String normalized = knowledgeId.trim();
+        Entry importedEntry = imported.get(normalized);
+        if (importedEntry != null) {
+            return Optional.of(importedEntry);
+        }
         return load().stream()
                 .filter(item -> normalized.equalsIgnoreCase(item.knowledgeId()))
                 .findFirst();
+    }
+
+    // ------------------------------------------------------------------
+    // 导入生成的知识（task-86；进程内覆盖层，不写文件）
+    // ------------------------------------------------------------------
+
+    /** 登记一条导入生成的知识（同 ID 覆盖；draft/pending_review/published 均由导入域决定）。 */
+    public void registerImported(Entry entry) {
+        if (entry == null || entry.knowledgeId() == null || entry.knowledgeId().isBlank()) {
+            return;
+        }
+        imported.put(entry.knowledgeId().trim(), entry);
+    }
+
+    /** 撤销登记（仅用于「直审索引失败回滚」，不产生半成品）。 */
+    public void unregisterImported(String knowledgeId) {
+        if (knowledgeId != null && !knowledgeId.isBlank()) {
+            imported.remove(knowledgeId.trim());
+        }
+    }
+
+    /** 更新导入知识状态（审核驳回 → rejected；审核通过走覆盖版本，无需改这里）。 */
+    public void updateImportedStatus(String knowledgeId, KnowledgeItemStatus status, String updatedAt) {
+        if (knowledgeId == null || knowledgeId.isBlank() || status == null) {
+            return;
+        }
+        imported.computeIfPresent(knowledgeId.trim(), (key, entry) -> new Entry(
+                entry.knowledgeId(), entry.title(), entry.content(), entry.version(), status, entry.owner(),
+                entry.effectiveFrom(), entry.effectiveTo(), entry.source(), entry.category(), entry.badcase(),
+                entry.badcaseCount(), entry.refs(), entry.keywords(),
+                updatedAt == null ? entry.updatedAt() : updatedAt));
+    }
+
+    /** 导入登记的知识 ID 集合（诊断/测试/review 联动用）。 */
+    public List<Entry> importedEntries() {
+        return List.copyOf(imported.values());
+    }
+
+    /** 是否导入生成的知识 */
+    public boolean isImported(String knowledgeId) {
+        return knowledgeId != null && imported.containsKey(knowledgeId.trim());
+    }
+
+    /** 演示/测试重置（生产实现不调用）。 */
+    public void clearImportedForTest() {
+        imported.clear();
     }
 
     /** 当前解析到的知识文件路径（诊断/报告用；未找到为 {@code null}）。 */

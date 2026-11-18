@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { WButton, WCard, WEmpty, WLoading, WModal, WPageHeader, WTabs, WTable, WTag, useToast } from '@/components'
 import PermissionDenied from '@/components/feedback/PermissionDenied.vue'
 import { RagAskPanel, RagHealthPanel } from '@/components/rag'
+import { KnowledgeImportPanel } from '@/components/knowledge-import'
 import { SCREENS } from '@/app/screens'
 import { ROLE_LABELS } from '@/app/roles'
 import { useAuthStore } from '@/stores/auth'
@@ -80,20 +82,24 @@ const PAGE_SIZE = 10
 
 /* ============================================== ⓪ 页签（P6 W33 RAG 增量） */
 /**
- * 页签（**不改 12 屏导航矩阵**：RAG 问答/健康挂在知识页内，不新增路由）：
+ * 页签（**不改 12 屏导航矩阵**：RAG 问答/健康/知识导入挂在知识页内，不新增路由）：
  * - `ops`：原知识运营视图（列表/详情/变更/审核/采纳看板），默认页签，DOM 与既有断言完全一致；
+ * - `import`：知识导入（P6 W34 task-87；`knowledge.import` 才显示；粘贴/上传/ZIP → 预览 → 提交待审/直审）；
  * - `ask`：知识秒查 RAG（`POST /api/v1/rag/query`：answer + `[n]` 引用 + 来源卡片 + 拒答 + 五态）；
  * - `health`：RAG 链路健康（`GET /api/v1/rag/health`，**仅 it/admin**；能力码 `rag.health` 来自
  *   `auth/capabilities.ts` 既有矩阵，前端只做入口显隐，真实 403 边界在 Java）。
  */
-type KnowledgeTab = 'ops' | 'ask' | 'health'
+type KnowledgeTab = 'ops' | 'import' | 'ask' | 'health'
 const activeTab = ref<KnowledgeTab>('ops')
 const canRagHealth = computed(() => auth.hasCapability('rag.health'))
+/** 导入入口按能力显隐（owner 无 knowledge.import → 不显示页签；真实边界在 Java 403） */
+const canImport = computed(() => auth.hasCapability('knowledge.import'))
 const tabs = computed(() => {
   const items: { key: KnowledgeTab; label: string; badge?: string }[] = [
     { key: 'ops', label: '运营视图' },
-    { key: 'ask', label: '智能问答', badge: 'RAG' },
   ]
+  if (canImport.value) items.push({ key: 'import', label: '导入', badge: 'P6' })
+  items.push({ key: 'ask', label: '智能问答', badge: 'RAG' })
   if (canRagHealth.value) items.push({ key: 'health', label: 'RAG 健康', badge: 'it/admin' })
   return items
 })
@@ -591,9 +597,61 @@ async function switchAccount(role: ActorRole): Promise<void> {
   }
 }
 
-/* ================================================================= ⑨ 生命周期 */
+/* ================================ ⑨ 页签深链（RAG 缺口沉淀 → 导入页签 / 导入→运营） */
+
+const route = useRoute()
+/** RAG 拒答卡「补充这条知识」带来的预填（问题标题 + sourceType=badcase） */
+const gapPrefill = ref<{ question: string; sourceType: 'badcase' } | null>(null)
+
+function queryText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0]
+  return ''
+}
+
+/**
+ * 页签深链口径：`/knowledge?tab=import&gap=<问题>`（`RagAskPanel` 拒答卡「补充这条知识」跳转；
+ * 不新增路由、不改 12 屏基线）。tab 只接受当前角色可见的页签，gap 只作为预填文本（≤200 字符）。
+ */
+function applyRouteQuery(): void {
+  const tab = queryText(route.query.tab)
+  if (tab && tabs.value.some((item) => item.key === tab)) {
+    activeTab.value = tab as KnowledgeTab
+  }
+  const gap = queryText(route.query.gap).trim()
+  if (gap) gapPrefill.value = { question: gap.slice(0, 200), sourceType: 'badcase' }
+}
+
+/** 导入页签内的「重复知识/完成任务」跳转：切回运营视图并按 id 读取知识详情（无 id 时只切页签） */
+function openKnowledgeFromImport(knowledgeId?: string): void {
+  activeTab.value = 'ops'
+  const id = (knowledgeId ?? '').trim()
+  if (!id) {
+    toast.info('已切换到运营视图：可在知识清单按标题检索新导入的知识（提交待审的需 it/admin 审核后才发布）')
+    return
+  }
+  selectedId.value = id
+  void loadDetail(id)
+  toast.info(`已切到运营视图并读取知识 ${id} 详情`)
+}
+
+watch(
+  () => route.query,
+  () => applyRouteQuery(),
+)
+
+/**
+ * 预填只消费一次：切离导入页签后清空 `gapPrefill`，避免再次进入时覆盖用户已编辑内容
+ * （深链 `?tab=import&gap=` 仍在地址栏，但表单不会被二次重置）。
+ */
+watch(activeTab, (tab) => {
+  if (tab !== 'import') gapPrefill.value = null
+})
+
+/* ================================================================= ⑩ 生命周期 */
 
 onMounted(() => {
+  applyRouteQuery()
   void Promise.all([loadList(), loadStats()])
 })
 
@@ -657,6 +715,9 @@ const sourceText = computed(() => {
       <WTabs v-model="activeTab" :tabs="tabs" data-testid="kb-tabs-items" />
       <span class="kb__tabbar-note" data-testid="kb-tab-note">
         <template v-if="activeTab === 'ops'">知识运营：清单 / 版本 / 变更审核 / 采纳与缺口（12 屏基线不变）</template>
+        <template v-else-if="activeTab === 'import'">
+          知识导入：粘贴 / 上传 / 批量 ZIP → 切分预览 → 提交待审（it/admin 可直审；POST /api/v1/knowledge/imports）
+        </template>
         <template v-else-if="activeTab === 'ask'">
           RAG 秒查：混合检索 + 引用校验 + 拒答（POST /api/v1/rag/query，能力 rag.query）
         </template>
@@ -1086,6 +1147,11 @@ const sourceText = computed(() => {
         </WCard>
       </div>
     </div>
+    </template>
+
+    <!-- ================= 知识导入（P6 W34 task-87；`knowledge.import` 才显示页签） ================= -->
+    <template v-else-if="activeTab === 'import'">
+      <KnowledgeImportPanel :prefill="gapPrefill" @open-knowledge="openKnowledgeFromImport" />
     </template>
 
     <!-- ================= 智能问答（RAG，POST /api/v1/rag/query） ================= -->

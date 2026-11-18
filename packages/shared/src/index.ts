@@ -627,9 +627,13 @@ export interface KnowledgeDoc {
  * **P6 v1.4.0 = W30 向后兼容增量（知识库 RAG）**——`/rag/query`（混合检索 + LLM 重排 + 引用校验/拒答）、
  * `/rag/health`（编排/模型健康，仅 it/admin）、`/knowledge/{id}/reindex`（重建索引 + 审计 `knowledge.reindex`）
  * 共 3 path / 3 operation / 12 schema；`AuditAction` 末尾追加 `knowledge.reindex`；
- * 见 `docs/openapi/README.md` §1.8 / §6.10 / §7.8（新基线 83 path / 87 operation / 301 schema）。
+ * 见 `docs/openapi/README.md` §1.8 / §6.10 / §7.8（基线 83 path / 87 operation / 301 schema，历史）；
+ * **P6 v1.5.0 = W34 向后兼容增量（知识导入：粘贴 / 单文件 / 批量 ZIP / 缺口沉淀）**——`/knowledge/imports`
+ * 4 path / 5 operation / 14 schema（`KnowledgeImportJob` 等 + 3 统一信封）；`AuditAction` 末尾追加
+ * `knowledge.import.commit` / `knowledge.index`；见 `docs/openapi/README.md` §1.9 / §6.11 / §7.9
+ * （**当前基线 87 path / 92 operation / 315 schema**）。
  */
-export const OPENAPI_VERSION = '1.4.0';
+export const OPENAPI_VERSION = '1.5.0';
 
 /** 契约通则版本（_design/02-架构设计.md §3.1，设计口径版本，非 OpenAPI 文件版本） */
 export const CONTRACT_VERSION = 'Canonical API v1.4';
@@ -1960,7 +1964,10 @@ export type AuditAction =
   | 'gray.policy.create'
   | 'gray.policy.update'
   // v1.4.0（P6 W30，知识库 RAG）末尾追加：知识重建索引（仅 it/admin；rag 问答/健康为只读，不落写审计）
-  | 'knowledge.reindex';
+  | 'knowledge.reindex'
+  // v1.5.0（P6 W34，知识导入）末尾追加：提交（资源 knowledge，resourceId=jobId）/ 索引入库
+  | 'knowledge.import.commit'
+  | 'knowledge.index';
 
 /** 审计动作全集（顺序与 OpenAPI `AuditAction.enum` 一致） */
 export const AUDIT_ACTIONS: readonly AuditAction[] = [
@@ -1993,6 +2000,9 @@ export const AUDIT_ACTIONS: readonly AuditAction[] = [
   'gray.policy.update',
   // v1.4.0（P6 W30）末尾追加
   'knowledge.reindex',
+  // v1.5.0（P6 W34，知识导入）末尾追加
+  'knowledge.import.commit',
+  'knowledge.index',
 ];
 
 /** 审计资源类型（OpenAPI `AuditResourceType`；`export` = 导出/下载类动作） */
@@ -4134,3 +4144,238 @@ export interface RagReindexResult {
 export type RagQueryResponse = ApiResponse<RagQueryResult>;
 export type RagHealthResponse = ApiResponse<RagHealth>;
 export type RagReindexResponse = ApiResponse<RagReindexResult>;
+
+/* ============================================================================
+ * 12. P6 v1.5.0 增量（P6 W34 知识导入）：任务 / 预览 / 警告 / 重复 / 提交 / 限额
+ *     OpenAPI `KnowledgeImport*` / `KnowledgeCommit*`；权限码 `knowledge.import` /
+ *     `knowledge.import.batch`（审核沿用 `knowledge.review`）；审计 `knowledge.import.commit` /
+ *     `knowledge.index`。原文**不做自动清理**（用户裁决：保留期不设自动删除，本契约不设 retention 字段）。
+ * ========================================================================== */
+
+/**
+ * 导入任务状态（v1.5.0，OpenAPI `KnowledgeImportJob.status` 内联枚举；顺序固定）。
+ * - `pending` 已受理 / `parsing` 解析中 / `preview_ready` 预览就绪（**唯一可 commit 状态**）
+ * - `committing` 提交中 / `indexing` 索引中 / `completed` 完成 / `failed` 失败（见 `error`）/
+ *   `cancelled` 已取消（终态）
+ * 终态（`committing`/`indexing`/`completed`/`failed`/`cancelled`）不可 cancel（409 `E-3002`）。
+ */
+export type KnowledgeImportJobStatus =
+  | 'pending'
+  | 'parsing'
+  | 'preview_ready'
+  | 'committing'
+  | 'indexing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+/** 导入任务状态全集（顺序与 OpenAPI `KnowledgeImportJob.status.enum` 一致） */
+export const KNOWLEDGE_IMPORT_JOB_STATUSES: readonly KnowledgeImportJobStatus[] = [
+  'pending',
+  'parsing',
+  'preview_ready',
+  'committing',
+  'indexing',
+  'completed',
+  'failed',
+  'cancelled',
+];
+
+/**
+ * 导入来源类型（v1.5.0，OpenAPI `KnowledgeImportJob.sourceType` 内联枚举）：
+ * `paste` 粘贴 / `file` 单文件 / `batch` ZIP 批量（需 `knowledge.import.batch`）/ `badcase` RAG 拒答缺口沉淀。
+ */
+export type KnowledgeImportSourceType =
+  | 'paste'
+  | 'file'
+  | 'batch'
+  | 'badcase';
+
+/** 导入来源类型全集（顺序与 OpenAPI `KnowledgeImportJob.sourceType.enum` 一致） */
+export const KNOWLEDGE_IMPORT_SOURCE_TYPES: readonly KnowledgeImportSourceType[] = [
+  'paste',
+  'file',
+  'batch',
+  'badcase',
+];
+
+/** 导入文件类型（v1.5.0，OpenAPI `KnowledgeImportJob.fileType` 内联枚举；类型白名单，其余 400 `E-1001`） */
+export type KnowledgeImportFileType =
+  | 'txt'
+  | 'md'
+  | 'docx'
+  | 'pdf'
+  | 'zip';
+
+/** 导入文件类型全集（顺序与 OpenAPI `KnowledgeImportJob.fileType.enum` 一致） */
+export const KNOWLEDGE_IMPORT_FILE_TYPES: readonly KnowledgeImportFileType[] = [
+  'txt',
+  'md',
+  'docx',
+  'pdf',
+  'zip',
+];
+
+/**
+ * 提交后知识状态（v1.5.0，OpenAPI `KnowledgeImportCommitRequest.status` 内联枚举）：
+ * `draft` 草稿 / `pending_review` 待审（缺省）/ `approved` 直审（**仅 it/admin**，其它角色 403 `E-2001`）。
+ */
+export type KnowledgeImportCommitStatus =
+  | 'draft'
+  | 'pending_review'
+  | 'approved';
+
+/** 提交状态全集（顺序与 OpenAPI `KnowledgeImportCommitRequest.status.enum` 一致） */
+export const KNOWLEDGE_IMPORT_COMMIT_STATUSES: readonly KnowledgeImportCommitStatus[] = [
+  'draft',
+  'pending_review',
+  'approved',
+];
+
+/**
+ * 知识导入限额（v1.5.0，服务端强制、前端只做提示；超限 413 `E-1001` / 超频 429 `E-4003`）。
+ * 口径来源：`docs/design/知识导入方案.md` §4.3 与用户裁决（README §7.9 限额表）。
+ */
+export const KNOWLEDGE_IMPORT_LIMITS = {
+  /** 单文件上限（10MB，字节） */
+  maxFileBytes: 10 * 1024 * 1024,
+  /** 粘贴文本上限（字符） */
+  maxPasteChars: 200_000,
+  /** ZIP 批量文件数上限 */
+  maxZipFiles: 50,
+  /** ZIP 解压总量上限（50MB，字节） */
+  maxZipBytes: 50 * 1024 * 1024,
+  /** 导入频率上限（次/分钟/账号） */
+  maxPerMinute: 10,
+  /** 账号并发任务上限 */
+  maxConcurrentJobs: 2,
+  /** 单文件类型白名单（批量另加 zip） */
+  allowedFileTypes: ['txt', 'md', 'docx', 'pdf'] as readonly KnowledgeImportFileType[],
+} as const;
+
+/**
+ * 粘贴文本 / 缺口沉淀导入请求（v1.5.0，OpenAPI `KnowledgeImportCreateRequest` /
+ * Java `bff/dto/KnowledgeImportCreateRequest`；`POST /api/v1/knowledge/imports` 的 JSON 分支）。
+ * `title` + `content` 必填；`content` ≤200,000 字符（超限 413 `E-1001`）；`sourceType` 只允许
+ * `paste`（缺省）/ `badcase`，文件与批量走同一 path 的 multipart 分支。
+ */
+export interface KnowledgeImportCreateRequest {
+  title: string;
+  content: string;
+  projectId?: string;
+  category?: KnowledgeCategory;
+  sourceType?: 'paste' | 'badcase';
+  effectiveFrom?: IsoDate;
+  effectiveTo?: IsoDate;
+  owner?: string;
+}
+
+/**
+ * 导入预览切分块（v1.5.0，OpenAPI `KnowledgeImportPreviewChunk`）。`seq` 从 1 连续且**稳定**
+ * （供 commit 按 seq 勾选）；`sectionPath` 为标题/条款路径（无结构时省略）；`text` 已脱敏。
+ */
+export interface KnowledgeImportPreviewChunk {
+  seq: number;
+  sectionPath?: string;
+  text: string;
+  charCount: number;
+}
+
+/** 导入预览（v1.5.0，OpenAPI `KnowledgeImportPreview`）；未就绪时 `chunks: []` + `totalChunks: 0`。 */
+export interface KnowledgeImportPreview {
+  chunks: KnowledgeImportPreviewChunk[];
+  totalChunks: number;
+}
+
+/**
+ * 导入警告（v1.5.0，OpenAPI `KnowledgeImportWarning`；**警告不阻断**）。
+ * `code` 口径：`pii_masked` / `duplicate_suspected` / `truncated` / `empty_text` / `injection_risk`，
+ * 未知 code 前端按通用警告展示（前向兼容）。
+ */
+export interface KnowledgeImportWarning {
+  code: string;
+  message: string;
+}
+
+/** 疑似重复知识（v1.5.0，OpenAPI `KnowledgeImportDuplicate`；SHA-256 归一化去重 + 相似度提示）。 */
+export interface KnowledgeImportDuplicate {
+  knowledgeId: string;
+  title: string;
+  similarity: number;
+}
+
+/** 导入失败原因（v1.5.0，OpenAPI `KnowledgeImportError`；`code` 必须取 17 类 `ErrorCode`，不新造字符串）。 */
+export interface KnowledgeImportError {
+  code: ErrorCode;
+  message: string;
+  retryable: boolean;
+}
+
+/**
+ * 知识导入任务（v1.5.0，OpenAPI `KnowledgeImportJob` / Java `bff/dto/KnowledgeImportJob`）。
+ * **不可信输入**：`preview.chunks[].text` 已脱敏（原文不做自动清理，但入库/预览只给脱敏文本）；
+ * `warnings` 提示不阻断；`duplicateOf` 提示重复候选；非本项目任务对外表现为 404 `E-3001`。
+ */
+export interface KnowledgeImportJob {
+  jobId: string;
+  projectId: string;
+  status: KnowledgeImportJobStatus;
+  sourceType: KnowledgeImportSourceType;
+  fileName?: string;
+  fileType?: KnowledgeImportFileType;
+  sizeBytes?: number;
+  checksum?: string;
+  title: string;
+  suggestedTitle?: string;
+  charCount?: number;
+  piiMaskedCount?: number;
+  preview: KnowledgeImportPreview;
+  warnings: KnowledgeImportWarning[];
+  duplicateOf?: KnowledgeImportDuplicate[];
+  createdBy: string;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+  error?: KnowledgeImportError;
+}
+
+/**
+ * 提交预览（v1.5.0，OpenAPI `KnowledgeImportCommitRequest`；**全部字段可选**）。
+ * `status` 缺省 = `pending_review`（待审）；`approved` 仅 it/admin 直审（否则 403 `E-2001`）；
+ * `chunks` 按 `seq` 只导入部分块（省略 = 全部）；写操作落审计 `knowledge.import.commit`。
+ */
+export interface KnowledgeImportCommitRequest {
+  title?: string;
+  category?: KnowledgeCategory;
+  owner?: string;
+  effectiveFrom?: IsoDate;
+  effectiveTo?: IsoDate;
+  status?: KnowledgeImportCommitStatus;
+  chunks?: number[];
+  reviewNote?: string;
+}
+
+/** 提交生成的知识项（v1.5.0，OpenAPI `KnowledgeCommitItem`）；`version` 从 `V1.0` 起，引用必须带版本。 */
+export interface KnowledgeCommitItem {
+  knowledgeId: string;
+  version: string;
+  status: KnowledgeItemStatus;
+}
+
+/** 提交结果（v1.5.0，OpenAPI `KnowledgeCommitResult`；批量导入可一次生成多条知识）。 */
+export interface KnowledgeCommitResult {
+  items: KnowledgeCommitItem[];
+}
+
+/** 导入任务列表结果（v1.5.0，OpenAPI `KnowledgeImportJobListResult`；分页口径沿用契约通则）。 */
+export interface KnowledgeImportJobListResult {
+  items: KnowledgeImportJob[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/* ---- P6 v1.5.0 响应信封别名（统一信封 `ApiResponse<T>`） ---- */
+
+export type KnowledgeImportJobResponse = ApiResponse<KnowledgeImportJob>;
+export type KnowledgeImportJobListResponse = ApiResponse<KnowledgeImportJobListResult>;
+export type KnowledgeCommitResponse = ApiResponse<KnowledgeCommitResult>;

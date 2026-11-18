@@ -127,6 +127,15 @@ class HybridRetriever:
         index.build([(c.chunk_id, c.text, c.category, c.status, c.project_id) for c in chunks])
         self._bm25 = index
 
+    def invalidate(self) -> None:
+        """索引变更（导入 / 撤销 / 重建）后失效缓存：下次检索按库内最新片段重建。
+
+        task-85：`POST /internal/rag/index|remove` 写入/删除 chunk 后必须调用，否则 BM25
+        缓存仍持有已删除片段 → 撤销后仍可召回（向量路已无该块，BM25 路却命中）。
+        """
+        self._bm25 = None
+        self._chunks_by_id = {}
+
     @property
     def bm25(self) -> BM25Index:
         self.ensure_index()

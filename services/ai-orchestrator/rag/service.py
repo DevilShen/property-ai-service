@@ -1,5 +1,5 @@
-"""内部检索/生成服务（W33）：`POST /internal/rag/search` · `POST /internal/rag/answer` · `GET /internal/rag/health`
-====================================================================================================================
+"""内部检索/生成/导入服务（W33 + task-85）：`/internal/rag/search|answer|preview|index|remove|health`
+=====================================================================================================
 
 为什么用标准库 `http.server`（而不是 Fastify/Flask）：
     - AGENTS.md 硬约束：Python 只做 AI 编排，本服务是**内网内部服务**，不对外、不进 OpenAPI；
@@ -25,22 +25,42 @@
                 "latencyMs": int, "traceId": "rag-answer-<hash>",
                 "promptVersion", "citations", "citationValid", "model", "attempts",
                 "temperatureFallback", "versionIntent", "guard", "rerank", "projectId", "scope"}
+    POST /internal/rag/preview（task-85 知识导入：解析 + 归一化 + 脱敏 + 切分 + 去重，不入库）
+        body : {"fileName"?: str, "fileType": "txt"|"md"|"docx"|"pdf", "text"?: str,
+                "contentBase64"?: str, "projectId": str, "title"?: str}
+        200  : {"ok": true, "data": {suggestedTitle, charCount, piiMaskedCount,
+                chunks: [{seq, sectionPath, text, charCount}], totalChunks,
+                warnings: [{code, message}], duplicates: [{knowledgeId, title, similarity}],
+                contentMasked}}
+    POST /internal/rag/index（task-85 导入提交/重建：单知识 upsert，复用 indexer 管道）
+        body : {knowledgeId, title, projectId, category, owner, version, effectiveFrom?,
+                effectiveTo?, status, content, sourceDocId?, checksum}
+        200  : {"ok": true, "data": {knowledgeId, chunks, indexedAt, skipped}}
+    POST /internal/rag/remove（task-85 撤销：删除该知识全部 chunk）
+        body : {"knowledgeId": str}
+        200  : {"ok": true, "data": {"removed": int}}
     GET  /internal/rag/health
         200  : {"ok": true, "status": "ok", "index": {chunks, backend, collection},
                 "models": {embed, llm, rerank}, "rerankMode": ..., "guard": {...},
                 "llm"/"embedding"/"vectorStore"/"reranker" 组件状态（W33 扩展，无密钥）,
+                "importer": {available, docx, pdf}（task-85：导入解析能力，不破坏既有字段）,
                 "promptVersion", "defaults": {projectId, topK}, "uptimeSeconds": int}
         组件 status 只取契约枚举 ok|degraded|down（W34 修复）：重排 off/enabled=false 属策略默认 → ok；
         degraded 只反映真实降级/故障（无 Key/仅检索、mock embedding、重排开启但模型不可用、向量库不可用）。
 
-鉴权（W32 安全底线，两个 POST 与 health 同口径）：
+导入端点错误映射（内部协议，见 `rag/importer.py`）：
+    400 `bad_request`（缺字段/扩展名非白名单/base64 失败）、413 `payload_too_large`（>10MB、>200k 字符）、
+    422 `parse_failed`（损坏/加密/扫描件/空文本/超时，带 `reason`）、500 `E-INTERNAL`。
+    响应信封沿用 `{ok, data}` / `{ok, error}`；鉴权、keep-alive、日志不落正文的口径与 search 一致。
+
+鉴权（W32 安全底线，所有 POST 与 health 同口径）：
     每个请求必须带 `X-Internal-Token: <token>`；token 只从环境变量
     `RAG_INTERNAL_TOKEN`（可用 `--token-env` 换名）读取。
     **未配置 token → 一律 401（`token_not_configured`）**，避免服务裸奔被内网任意调用；
     token 比较用 `hmac.compare_digest`（常量时间），日志/响应绝不回显 token。
 
-隐私：日志只记录 query 长度 + query_hash + 项目 + 状态码 + 耗时 + answerable/citations 数，
-**不落问题原文、不落答案正文**。
+隐私：日志只记录 query 长度 + query_hash + 项目 + 状态码 + 耗时 + answerable/citations 数；
+导入日志只记文件类型/字符数/块数/PII 计数/重复数，**不落正文、不落文件名以外的正文信息**。
 """
 
 from __future__ import annotations
@@ -55,6 +75,7 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 
+from . import importer
 from .config import Settings, load_settings, mask_secret
 from .generation import PROMPT_VERSION, AnswerResult, answer as generate_answer, detect_version_intent
 from .guard import AnswerGuard, GuardResult
@@ -65,8 +86,29 @@ from .store import RetrievedChunk, VectorStore
 
 DEFAULT_TOKEN_ENV = "RAG_INTERNAL_TOKEN"
 MAX_BODY_BYTES = 64 * 1024
+# 导入请求体：contentBase64 最大 10MB → base64 ≈13.98MB，留 JSON 余量
+MAX_IMPORT_BODY_BYTES = 16 * 1024 * 1024
 SERVICE_NAME = "rag-search"
 ANSWER_MODES = ("generative", "retrieval_only")
+#: POST 路由表（path → RagSearchService 方法名）
+POST_ROUTES: dict[str, str] = {
+    "/internal/rag/search": "search",
+    "/internal/rag/answer": "answer",
+    "/internal/rag/preview": "preview",
+    "/internal/rag/index": "index_knowledge",
+    "/internal/rag/remove": "remove_knowledge",
+}
+#: 导入协议端点（snake_case 错误码口径；preview/index 另允许 16MB 请求体）
+IMPORT_PATHS = frozenset(
+    {"/internal/rag/preview", "/internal/rag/index", "/internal/rag/remove"}
+)
+#: 允许大请求体的导入端点（contentBase64 文件上传）
+LARGE_BODY_PATHS = frozenset({"/internal/rag/preview", "/internal/rag/index"})
+
+
+def body_limit_for(path: str) -> int:
+    """按路径返回请求体上限：导入文件端点 16MB（base64 文件），其余 64KB。"""
+    return MAX_IMPORT_BODY_BYTES if path in LARGE_BODY_PATHS else MAX_BODY_BYTES
 
 
 def _now() -> float:
@@ -112,6 +154,8 @@ class RagSearchService:
         self.guard = guard or AnswerGuard(settings)
         self.llm = llm or LLMClient(settings)
         self.started_at = _now()
+        #: 导入预览近似去重用的向量器（懒构造：仅在首次 preview 时加载缓存/客户端）
+        self._import_embedder: Any = None
 
     # ---- 校验 ----
     def _validate(self, payload: dict[str, Any]) -> tuple[str, str, str | None, int]:
@@ -296,6 +340,93 @@ class RagSearchService:
         )
         return 200, body
 
+    # ---- 导入端点（task-85：preview / index / remove）----
+    def _importer_embedder(self) -> Any:
+        """预览近似去重用的向量器（懒构造）；构造失败返回 None → 跳过近似去重（不阻断预览）。"""
+        if self._import_embedder is None:
+            try:
+                from .embedder import Embedder
+
+                self._import_embedder = Embedder(self.settings)
+            except Exception as exc:  # noqa: BLE001 - 近似去重不是必需能力
+                self.log(f"[service][warn] 导入近似去重不可用：{type(exc).__name__}: {str(exc)[:120]}")
+                return None
+        return self._import_embedder
+
+    def _invalidate_retriever(self) -> None:
+        """索引变更后失效检索缓存（BM25 懒构建；否则撤销后仍可被 BM25 召回）。"""
+        invalidate = getattr(self.retriever, "invalidate", None)
+        if callable(invalidate):
+            try:
+                invalidate()
+            except Exception as exc:  # noqa: BLE001 - 缓存失效失败不影响写库结果
+                self.log(f"[service][warn] 检索缓存失效失败：{type(exc).__name__}")
+
+    @staticmethod
+    def _import_error_body(exc: importer.ImporterError) -> dict[str, Any]:
+        return {"ok": False, "error": exc.to_error()}
+
+    def preview(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """POST /internal/rag/preview：解析 + 归一化 + PII 脱敏 + 切分 + 去重（不写库）。"""
+        try:
+            data = importer.preview(
+                payload,
+                settings=self.settings,
+                store=self.store,
+                embedder=self._importer_embedder(),
+            )
+        except importer.ImporterError as exc:
+            self.log(
+                f"[service] preview rejected status={exc.status} code={exc.code} reason={exc.reason or '-'}"
+            )
+            return exc.status, self._import_error_body(exc)
+        self.log(
+            f"[service] preview ok fileType={str(payload.get('fileType') or '')[:8]} "
+            f"chars={data['charCount']} chunks={data['totalChunks']} pii={data['piiMaskedCount']} "
+            f"dup={len(data['duplicates'])} warnings={len(data['warnings'])}"
+        )
+        return 200, {"ok": True, "data": data}
+
+    def index_knowledge(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """POST /internal/rag/index：单知识 upsert（幂等：同 knowledgeId+checksum → skipped）。"""
+        try:
+            data = importer.index_knowledge(
+                payload,
+                settings=self.settings,
+                store=self.store,
+                embedder=self._importer_embedder(),
+                print_fn=self.log,
+            )
+        except importer.ImporterError as exc:
+            self.log(
+                f"[service] index rejected status={exc.status} code={exc.code} reason={exc.reason or '-'}"
+            )
+            return exc.status, self._import_error_body(exc)
+        self._invalidate_retriever()
+        self.log(
+            f"[service] index ok knowledgeId={data['knowledgeId']} chunks={data['chunks']} "
+            f"skipped={data['skipped']}"
+        )
+        return 200, {"ok": True, "data": data}
+
+    def remove_knowledge(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """POST /internal/rag/remove：撤销一条知识（删除全部 chunk + 审计）。"""
+        try:
+            data = importer.remove_knowledge(
+                payload,
+                settings=self.settings,
+                store=self.store,
+                print_fn=self.log,
+            )
+        except importer.ImporterError as exc:
+            self.log(
+                f"[service] remove rejected status={exc.status} code={exc.code} reason={exc.reason or '-'}"
+            )
+            return exc.status, self._import_error_body(exc)
+        self._invalidate_retriever()
+        self.log(f"[service] remove ok knowledgeId={payload.get('knowledgeId')} removed={data['removed']}")
+        return 200, {"ok": True, "data": data}
+
     # ---- 响应映射辅助 ----
     @staticmethod
     def _source_row(source: dict[str, Any]) -> dict[str, Any]:
@@ -448,6 +579,8 @@ class RagSearchService:
                 "status": reranker_status,
                 "detail": reranker_detail,
             },
+            # ---- task-85：知识导入解析能力（不破坏既有字段；docx/pdf 依赖真实可用性）----
+            "importer": importer.health(),
             "promptVersion": PROMPT_VERSION,
             "answer": {
                 "maxChars": self.settings.answer_max_chars,
@@ -510,8 +643,8 @@ class _Handler(BaseHTTPRequestHandler):
         if length <= 0:
             self._body_consumed = True
             return
-        if length > MAX_BODY_BYTES:
-            # 超大 body 不读：直接断开连接，绝不把未知字节当作下一条请求
+        # 导入端点允许大 body（base64 文件），其余保持 64KB；超限一律不读并关闭连接
+        if length > body_limit_for(self.path.split("?")[0]):
             self._body_consumed = True
             self.close_connection = True
             return
@@ -577,13 +710,21 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib 约定
         self._body_consumed = False
         path = self.path.split("?")[0]
-        if path not in {"/internal/rag/search", "/internal/rag/answer"}:
+        if path not in POST_ROUTES:
             self._drain_body()
             self._send(
                 404,
-                {"ok": False, "error": {"code": "not_found", "message": "仅支持 /internal/rag/search、/internal/rag/answer"}},
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "not_found",
+                        "message": "仅支持 /internal/rag/search、/internal/rag/answer、"
+                        "/internal/rag/preview、/internal/rag/index、/internal/rag/remove",
+                    },
+                },
             )
             return
+        is_import = path in IMPORT_PATHS
         failure = self._auth_failure()
         if failure is not None:
             self._drain_body()
@@ -593,25 +734,63 @@ class _Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             self.close_connection = True
-            self._send(400, {"ok": False, "error": {"code": "E-INVALID-PARAM", "message": "Content-Length 非法"}})
+            self._send(
+                400,
+                {"ok": False, "error": {"code": "bad_request" if is_import else "E-INVALID-PARAM",
+                                        "message": "Content-Length 非法"}},
+            )
             return
-        if length <= 0 or length > MAX_BODY_BYTES:
+        limit = body_limit_for(path)
+        if length <= 0:
             self.close_connection = True
             self._body_consumed = True
-            self._send(400, {"ok": False, "error": {"code": "E-INVALID-PARAM", "message": f"请求体长度非法（{length}）"}})
+            self._send(
+                400,
+                {"ok": False, "error": {"code": "bad_request" if is_import else "E-INVALID-PARAM",
+                                        "message": f"请求体长度非法（{length}）"}},
+            )
+            return
+        if length > limit:
+            self.close_connection = True
+            self._body_consumed = True
+            if is_import:
+                self._send(
+                    413,
+                    {
+                        "ok": False,
+                        "error": {
+                            "code": "payload_too_large",
+                            "message": f"请求体超限（{length} > {limit} 字节）",
+                            "reason": "body_too_large",
+                        },
+                    },
+                )
+            else:
+                self._send(
+                    400,
+                    {"ok": False, "error": {"code": "E-INVALID-PARAM", "message": f"请求体长度非法（{length}）"}},
+                )
             return
         raw = self.rfile.read(length)
         self._body_consumed = True
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            self._send(400, {"ok": False, "error": {"code": "E-INVALID-PARAM", "message": f"JSON 解析失败：{exc}"}})
+            self._send(
+                400,
+                {"ok": False, "error": {"code": "bad_request" if is_import else "E-INVALID-PARAM",
+                                        "message": f"JSON 解析失败：{exc}"}},
+            )
             return
         if not isinstance(payload, dict):
-            self._send(400, {"ok": False, "error": {"code": "E-INVALID-PARAM", "message": "请求体必须是 JSON 对象"}})
+            self._send(
+                400,
+                {"ok": False, "error": {"code": "bad_request" if is_import else "E-INVALID-PARAM",
+                                        "message": "请求体必须是 JSON 对象"}},
+            )
             return
         try:
-            handler = self.service.search if path == "/internal/rag/search" else self.service.answer
+            handler = getattr(self.service, POST_ROUTES[path])
             status, body = handler(payload)
         except Exception as exc:  # noqa: BLE001 - 服务端异常 → 500，不泄漏堆栈
             (self.log_fn or print)(f"[service][error] 内部错误：{type(exc).__name__}: {str(exc)[:200]}")
@@ -696,6 +875,7 @@ def main(argv: list[str] | None = None) -> int:
         f"[service] 启动 {host}:{port}｜chunks={health['index']['chunks']}｜backend={health['index']['backend']}"
         f"｜embed={health['models']['embed']}｜llm={health['llm']['model']}({health['llm']['mode']})"
         f"｜rerankMode={health['rerankMode']}｜promptVersion={health['promptVersion']}"
+        f"｜importer=docx:{health['importer']['docx']},pdf:{health['importer']['pdf']}"
         f"｜token={'已配置' if token else '未配置→401'}",
         flush=True,
     )
@@ -716,8 +896,12 @@ def main(argv: list[str] | None = None) -> int:
 __all__ = [
     "ANSWER_MODES",
     "DEFAULT_TOKEN_ENV",
+    "IMPORT_PATHS",
+    "MAX_IMPORT_BODY_BYTES",
+    "POST_ROUTES",
     "RagSearchService",
     "RetrievalOutcome",
+    "body_limit_for",
     "create_server",
     "main",
 ]

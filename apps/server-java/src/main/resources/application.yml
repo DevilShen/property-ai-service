@@ -4,6 +4,13 @@ server:
 spring:
   application:
     name: property-ai-server
+  # P6 W34 知识导入（task-86）：multipart 上传上限（容器级）。
+  # 单文件合同 ≤10MB、ZIP 批量 ≤50MB；容器放宽到 50MB/64MB，业务限额由
+  # property.knowledge.import.* 在服务端强制（超限 413 E-1001，不落 500）。
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 64MB
 
 management:
   endpoints:
@@ -21,6 +28,19 @@ property:
     jwt-secret: property-ai-demo-only-jwt-secret-2026-11
     # token 有效期（秒）：与 shared/OpenAPI AUTH_TOKEN_TTL_SECONDS = 7200 一致
     token-ttl-seconds: 7200
+
+  # P6 W34 知识导入限额/开关（task-86，契约 v1.5.0 §7.9；默认值与 shared KNOWLEDGE_IMPORT_LIMITS 对齐）。
+  # 服务端强制、前端只做提示；超限：413 E-1001（payload_too_large）、超频/并发：429 E-4003（rate_limited）。
+  # demo 口径：原文不清理（不设 retention 字段）；直审默认仅 it/admin（direct-approve-enabled=false 时全禁用）。
+  knowledge:
+    import:
+      max-file-bytes: 10485760
+      max-paste-chars: 200000
+      max-zip-files: 50
+      max-zip-bytes: 52428800
+      max-per-minute: 10
+      max-concurrent-jobs: 2
+      direct-approve-enabled: true
 
   # P6 W30 RAG 接线（task-80，契约 v1.4.0 /rag/query、/rag/health、/knowledge/{id}/reindex）
   # 数据面在 Python 编排层 services/ai-orchestrator（内网 /internal/rag/*），Java 只做出站 HTTP + 映射 + 降级，

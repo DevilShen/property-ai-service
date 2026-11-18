@@ -344,6 +344,24 @@ public final class PermissionMatrix {
      */
     public static final String KNOWLEDGE_REINDEX = "knowledge.reindex";
 
+    // ---------------- P6 W34 知识导入能力（契约 v1.5.0 §7.9；平台级权限标识，不是错误码） ----------------
+
+    /**
+     * 知识导入（{@code POST/GET /api/v1/knowledge/imports*}）：<b>steward / agent / supervisor / it / admin</b>；
+     * owner ❌ 403 {@code E-2001}（{@code details.requiredCapability=knowledge.import}）。
+     *
+     * <p>数据范围：steward/agent/supervisor 仅本项目（跨项目 403 {@code E-2002} {@code cross_project}）；
+     * it/admin 平台级（跨项目可见）；非本项目任务对外 404 {@code E-3001}。
+     * 创建任务不落独立写审计；{@code commit} 落 {@code knowledge.import.commit}。
+     */
+    public static final String KNOWLEDGE_IMPORT = "knowledge.import";
+    /**
+     * 知识批量导入（ZIP，{@code sourceType=batch}）：<b>steward / agent / supervisor / it / admin</b>；
+     * 缺该能力 → 403 {@code E-2001}（{@code details.requiredCapability=knowledge.import.batch}）。
+     * 限额：ZIP ≤50 文件 / 解压总量 ≤50MB（超限 413 {@code E-1001}）。
+     */
+    public static final String KNOWLEDGE_IMPORT_BATCH = "knowledge.import.batch";
+
     private static final Map<ActorRole, Set<String>> MATRIX;
     private static final List<EndpointRule> RULES;
 
@@ -438,6 +456,7 @@ public final class PermissionMatrix {
                 COMPLAINT_CREATE, COMPLAINT_READ, COMPLAINT_HANDLE, COMPLAINT_STATS,
                 DUNNING_TASK,
                 KNOWLEDGE_READ, KNOWLEDGE_CHANGE, KNOWLEDGE_STATS,
+                KNOWLEDGE_IMPORT, KNOWLEDGE_IMPORT_BATCH,
                 COPILOT_USE, COPILOT_BROADCAST,
                 PROJECT_READ, RAG_QUERY);
         Set<String> agent = capabilitySet(
@@ -445,6 +464,7 @@ public final class PermissionMatrix {
                 COMPLAINT_CREATE, COMPLAINT_READ, COMPLAINT_HANDLE, COMPLAINT_STATS,
                 DUNNING_TASK,
                 KNOWLEDGE_READ, KNOWLEDGE_CHANGE, KNOWLEDGE_STATS,
+                KNOWLEDGE_IMPORT, KNOWLEDGE_IMPORT_BATCH,
                 COPILOT_USE, COPILOT_BROADCAST,
                 DESK_QUEUE, DESK_TAKEOVER, DESK_RELEASE, DESK_SLA, DESK_QA_SCORE,
                 PROJECT_READ, RAG_QUERY);
@@ -454,6 +474,7 @@ public final class PermissionMatrix {
                 COMPLAINT_CREATE, COMPLAINT_READ, COMPLAINT_HANDLE, COMPLAINT_ESCALATE, COMPLAINT_STATS,
                 DUNNING_TASK,
                 KNOWLEDGE_READ, KNOWLEDGE_CHANGE, KNOWLEDGE_STATS,
+                KNOWLEDGE_IMPORT, KNOWLEDGE_IMPORT_BATCH,
                 COPILOT_USE, COPILOT_BROADCAST,
                 DESK_QUEUE, DESK_TAKEOVER, DESK_RELEASE, DESK_SLA, DESK_QA_SCORE, DESK_QA_STATS,
                 TRACE_READ, TRACE_EXPORT,
@@ -463,6 +484,7 @@ public final class PermissionMatrix {
                 CONNECTOR_READ, CONNECTOR_PROBE, DEGRADE_READ, AUDIT_READ, RECON_RUN, RECON_REPORT,
                 FEE_CATALOG_CHANGE, FEE_CATALOG_REVIEW,
                 KNOWLEDGE_READ, KNOWLEDGE_CHANGE, KNOWLEDGE_REVIEW, KNOWLEDGE_STATS, KNOWLEDGE_REINDEX,
+                KNOWLEDGE_IMPORT, KNOWLEDGE_IMPORT_BATCH,
                 COPILOT_USE,
                 DESK_QUEUE, DESK_SLA, DESK_QA_SCORE, DESK_QA_STATS,
                 TRACE_READ, TRACE_EXPORT,
@@ -583,6 +605,28 @@ public final class PermissionMatrix {
                 // 必须排在 /knowledge/{knowledgeId} 之前（本矩阵按注册顺序匹配，变量段正则会吞掉 search/stats）。
                 // 写审计：knowledge.change / knowledge.review（resourceType=knowledge、resourceId=knowledgeId
                 // 由路径动态段取值、maskedFields 只记字段名），统一由 AuditFilter 落库，领域服务不重复写。
+
+                // ---------------- 知识导入（P6 W34 / task-86，契约 v1.5.0 §7.9） ----------------
+                // **顺序约束**：字面量段 /knowledge/imports* 必须排在 /knowledge/{knowledgeId} 之前，
+                // 否则 GET /knowledge/imports 会被当成 knowledgeId 而 404/403。
+                // 能力：knowledge.import（steward/agent/supervisor/it/admin；owner 403 E-2001）；
+                //       批量 ZIP 的 knowledge.import.batch 在服务层按 sourceType=batch 二次校验（同角色集合，
+                //       端点级无法从 multipart 字段预判，故不登记为端点能力）。
+                // 审计：创建任务不落独立写审计（契约口径）；commit 落 knowledge.import.commit
+                //       （resourceType=knowledge、resourceId=jobId 由路径动态段取）；
+                //       knowledge.index 由导入服务在索引成功/失败时显式落库（避免双写）。
+                rule("POST", "/api/v1/knowledge/imports", KNOWLEDGE_IMPORT, null, AuditResourceType.KNOWLEDGE,
+                        false),
+                rule("GET", "/api/v1/knowledge/imports", KNOWLEDGE_IMPORT, null, AuditResourceType.KNOWLEDGE,
+                        false),
+                rule("GET", "/api/v1/knowledge/imports/{jobId}", KNOWLEDGE_IMPORT, null,
+                        AuditResourceType.KNOWLEDGE, false),
+                rule("POST", "/api/v1/knowledge/imports/{jobId}/commit", KNOWLEDGE_IMPORT,
+                        AuditAction.KNOWLEDGE_IMPORT_COMMIT, AuditResourceType.KNOWLEDGE, false,
+                        "title", "owner", "reviewNote"),
+                rule("POST", "/api/v1/knowledge/imports/{jobId}/cancel", KNOWLEDGE_IMPORT, null,
+                        AuditResourceType.KNOWLEDGE, false),
+
                 rule("GET", "/api/v1/knowledge/search", KNOWLEDGE_READ, null, AuditResourceType.KNOWLEDGE, false),
                 rule("GET", "/api/v1/knowledge/stats", KNOWLEDGE_STATS, null, AuditResourceType.KNOWLEDGE, false),
                 rule("POST", "/api/v1/knowledge/{knowledgeId}/change", KNOWLEDGE_CHANGE,

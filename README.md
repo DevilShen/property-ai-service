@@ -10,7 +10,7 @@
   <img alt="Spring Boot" src="https://img.shields.io/badge/Spring%20Boot-3.4-6db33f">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.11-3776ab">
   <img alt="RAG" src="https://img.shields.io/badge/RAG-hybrid%20retrieval%20%2B%20LLM--rerank-8957e5">
-  <img alt="OpenAPI" src="https://img.shields.io/badge/OpenAPI-v1.4.0-6ba539">
+  <img alt="OpenAPI" src="https://img.shields.io/badge/OpenAPI-v1.5.0-6ba539">
 </p>
 
 > 本仓库仅包含**核心业务代码**（前端 / BFF / AI 编排层 / 共享契约类型）。Mock 服务、测试与门禁脚本、演示语料、
@@ -60,6 +60,14 @@
     <td><img src="assets/screenshots/10-knowledge.webp" alt="知识运营" /><br/><sub><b>知识运营</b>：状态分布、版本与生效期、变更审核、badcase</sub></td>
   </tr>
   <tr>
+    <td><img src="assets/screenshots/18-import-tab.webp" alt="知识导入" /><br/><sub><b>知识导入</b>：粘贴文本 / 上传 md、txt、docx、pdf / 批量 ZIP</sub></td>
+    <td><img src="assets/screenshots/19-import-preview.webp" alt="导入预览" /><br/><sub><b>导入预览</b>：结构切分块、PII 与重复提示、元数据与审核方式</sub></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/20-import-jobs.webp" alt="导入任务" /><br/><sub><b>导入任务</b>：状态轮询、失败原因、取消 / 重试与索引结果</sub></td>
+    <td></td>
+  </tr>
+  <tr>
     <td><img src="assets/screenshots/15-rag-answer.webp" alt="RAG 问答" /><br/><sub><b>RAG 知识问答（生成模式）</b>：答案带 <code>[n]</code> 引用，来源卡片可追溯</sub></td>
     <td><img src="assets/screenshots/16-rag-idle.webp" alt="RAG 空态" /><br/><sub><b>知识秒查入口</b>：示例问题、模式说明与能力提示（空态）</sub></td>
   </tr>
@@ -101,6 +109,7 @@
 - **多项目隔离**：项目维度数据/知识/配置隔离，跨项目访问返回 `E-2002 cross_project`
 - **可观测性**：请求/错误/缓存/连接器健康/事件积压指标，链路健康检查
 - **知识与 RAG 运营**：知识变更审核、生效期管理、索引重建、RAG 评测门禁
+- **知识导入（P0/P1）**：粘贴文本 / 上传 md、txt、docx、pdf / 批量 ZIP（≤50 文件）→ 解析预览（切分块、PII 脱敏、重复检测）→ 提交待审或直审（仅 it/admin）→ 审核通过后自动索引；原文长期保留，可追溯来源文件与校验和
 
 ### AI 能力（RAG）
 - **混合检索**：向量召回 + BM25 字面召回，RRF 融合，元数据前置过滤（项目/状态/生效期）
@@ -319,11 +328,11 @@ flowchart TD
 
 | 项 | 基线 |
 |---|---|
-| Java 单测 | **1004** 通过 |
-| Python（RAG）单测 | **261** 通过 |
+| Java 单测 | **1039** 通过 |
+| Python（RAG）单测 | **310** 通过 |
 | Web 单测 | **79** 通过 |
-| 契约一致性 | **5029** 断言通过（OpenAPI ↔ shared ↔ Java DTO） |
-| E2E（Playwright，串行） | **221 passed / 0 failed / 4 skipped** |
+| 契约一致性 | **5506** 断言通过（OpenAPI v1.5.0 ↔ shared ↔ Java DTO） |
+| E2E（Playwright，串行） | **228 passed / 0 failed / 4 skipped** |
 | 安全回归 | **183/183**（401/403 矩阵、跨项目隔离、审计留痕） |
 | 死按钮审计 | **0 dead** |
 | 视觉回归 | 布局回归 **0**（动态数据/时间态差异单列说明） |

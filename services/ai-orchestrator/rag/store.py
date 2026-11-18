@@ -57,6 +57,12 @@ class RetrievedChunk:
     # W32：生效期（召回层二次兜底用；空 = 不限）
     effective_from: str = ""
     effective_to: str = ""
+    # task-85（知识导入）：正文 hash / 外部校验和 / 来源文档 / 索引时间（去重与幂等用）
+    source_hash: str = ""
+    doc_checksum: str = ""
+    content_sha256: str = ""
+    source_doc_id: str = ""
+    indexed_at: str = ""
 
     @property
     def category_name(self) -> str:
@@ -86,6 +92,11 @@ class RetrievedChunk:
             "archived": self.archived,
             "effective_from": self.effective_from,
             "effective_to": self.effective_to,
+            "source_hash": self.source_hash,
+            "doc_checksum": self.doc_checksum,
+            "content_sha256": self.content_sha256,
+            "source_doc_id": self.source_doc_id,
+            "indexed_at": self.indexed_at,
             "score": round(float(self.score), 6),
             "rrf_score": round(float(self.rrf_score), 6),
             "bm25_score": round(float(self.bm25_score), 6),
@@ -161,6 +172,11 @@ class BaseStore:
             "service_scope": str(chunk.get("service_scope") or "平台"),
             "block_type": str(chunk.get("block_type") or ""),
             "archived": bool(chunk.get("archived") or False),
+            # task-85（知识导入）：导入去重与索引幂等用元数据（Chroma 值限制为 str/int/float/bool）
+            "doc_checksum": str(chunk.get("doc_checksum") or ""),
+            "content_sha256": str(chunk.get("content_sha256") or ""),
+            "source_doc_id": str(chunk.get("source_doc_id") or ""),
+            "indexed_at": str(chunk.get("indexed_at") or ""),
         }
 
     @staticmethod
@@ -334,6 +350,11 @@ class MemoryStore(BaseStore):
             archived=bool(meta.get("archived") or False),
             effective_from=str(meta.get("effective_from") or ""),
             effective_to=str(meta.get("effective_to") or ""),
+            source_hash=str(meta.get("source_hash") or ""),
+            doc_checksum=str(meta.get("doc_checksum") or ""),
+            content_sha256=str(meta.get("content_sha256") or ""),
+            source_doc_id=str(meta.get("source_doc_id") or ""),
+            indexed_at=str(meta.get("indexed_at") or ""),
             score=float(score),
         )
 

@@ -16,6 +16,11 @@
  * `RagSource` / `RagHealth` / `RagComponent` / `RAG_MODES` / `RAG_REFUSAL_REASONS` / `RAG_TOP_K_RANGE`）
  * 只做 re-export，页面一律从 `@/api` 取；**不复制、不手写**与契约分叉的定义。
  *
+ * P6 W34 增量（task-87）：知识导入（契约 v1.5.0 §12）的类型与常量（`KnowledgeImportJob` /
+ * `KnowledgeImportCreateRequest` / `KnowledgeImportCommitRequest` / `KnowledgeCommitResult` /
+ * `KNOWLEDGE_IMPORT_LIMITS` 等）同样只做 re-export；前端限额提示读 `KNOWLEDGE_IMPORT_LIMITS`，
+ * 不硬编码 10MB / 200000 / 50 文件等数字。
+ *
  * 契约变更流程（AGENTS.md §3）：先改 `docs/openapi/openapi.yaml` → 同步 shared / Java DTO → 前端自动跟随。
  */
 export type {
@@ -284,6 +289,26 @@ export type {
   RagQueryResponse,
   RagHealthResponse,
   RagReindexResponse,
+  // ---- P6 v1.5.0 / §12 知识导入 W34 增量（task-87 前端）----
+  // **唯一 TS 事实源**（shared §12）；前端禁止另写一套 job/status/warning/限额形状。
+  KnowledgeImportJobStatus,
+  KnowledgeImportSourceType,
+  KnowledgeImportFileType,
+  KnowledgeImportCommitStatus,
+  KnowledgeImportCreateRequest,
+  KnowledgeImportPreviewChunk,
+  KnowledgeImportPreview,
+  KnowledgeImportWarning,
+  KnowledgeImportDuplicate,
+  KnowledgeImportError,
+  KnowledgeImportJob,
+  KnowledgeImportCommitRequest,
+  KnowledgeCommitItem,
+  KnowledgeCommitResult,
+  KnowledgeImportJobListResult,
+  KnowledgeImportJobResponse,
+  KnowledgeImportJobListResponse,
+  KnowledgeCommitResponse,
 } from '../../../../packages/shared/src/index'
 
 export {
@@ -370,4 +395,10 @@ export {
   RAG_REFUSAL_REASONS,
   RAG_TOP_K_RANGE,
   RAG_DEFAULT_TOP_K,
+  // ---- P6 v1.5.0 / §12 知识导入 W34 增量：状态 / 来源 / 文件类型 / 提交状态 / 限额（全部来自 shared） ----
+  KNOWLEDGE_IMPORT_JOB_STATUSES,
+  KNOWLEDGE_IMPORT_SOURCE_TYPES,
+  KNOWLEDGE_IMPORT_FILE_TYPES,
+  KNOWLEDGE_IMPORT_COMMIT_STATUSES,
+  KNOWLEDGE_IMPORT_LIMITS,
 } from '../../../../packages/shared/src/index'

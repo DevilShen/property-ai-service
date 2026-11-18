@@ -46,6 +46,12 @@ export interface ApiRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   /** 请求体：对象按 JSON 序列化，字符串原样发送 */
   body?: unknown
+  /**
+   * multipart 请求体（`FormData`；与 `body` 互斥）。
+   * `Content-Type` **不手工设置**：由浏览器补 `multipart/form-data; boundary=...`，
+   * 手工设置会丢失 boundary 导致服务端解析失败（知识导入 task-87 上传/ZIP 用）。
+   */
+  formData?: FormData
   /** 写操作幂等键（映射为 `Idempotency-Key` 头；≥8 字符） */
   idempotencyKey?: string
   /** 客户端 traceId（映射为 `X-Trace-Id` 头） */
@@ -179,15 +185,24 @@ async function performFetch(path: string, options: ApiRequestOptions): Promise<R
   const onExternalAbort = () => controller.abort()
   options.signal?.addEventListener('abort', onExternalAbort)
 
-  const hasBody = options.body !== undefined
+  const hasJsonBody = options.body !== undefined
+  const hasFormBody = options.formData !== undefined
+  const hasBody = hasJsonBody || hasFormBody
   const method = options.method ?? (hasBody ? 'POST' : 'GET')
   // P5 W19：项目作用域统一注入（GET + 项目作用域白名单前缀；页面显式传 projectId 时不覆盖）
   const scopedPath = withProjectScope(path, method)
   try {
     return await fetch(`${BASE}${scopedPath}`, {
       method,
-      headers: buildHeaders(options, hasBody),
-      body: hasBody ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : undefined,
+      // multipart 不设 Content-Type（浏览器补 boundary）；JSON 才补 application/json
+      headers: buildHeaders(options, hasJsonBody),
+      body: hasFormBody
+        ? options.formData
+        : hasJsonBody
+          ? typeof options.body === 'string'
+            ? options.body
+            : JSON.stringify(options.body)
+          : undefined,
       signal: controller.signal,
     })
   } catch (error) {
@@ -249,6 +264,21 @@ export async function request<T>(path: string, options: ApiRequestOptions = {}):
   }
 
   return { data: body.data as T, traceId: body.traceId ?? '', degraded: body.degraded }
+}
+
+/**
+ * multipart 请求（P6 W34 task-87：知识导入上传文件 / ZIP 批量）。
+ * ---------------------------------------------------------------------------
+ * 与 {@link request} 共用同一套鉴权头、超时、项目作用域与错误信封解析；
+ * **不手工设置 `Content-Type`**（浏览器自动补 `multipart/form-data; boundary=...`），
+ * 否则 boundary 丢失、Java 侧 `MultipartFile` 解析失败。
+ */
+export async function requestMultipart<T>(
+  path: string,
+  formData: FormData,
+  options: Omit<ApiRequestOptions, 'body' | 'formData'> = {},
+): Promise<ApiResult<T>> {
+  return request<T>(path, { ...options, method: options.method ?? 'POST', formData })
 }
 
 /* ============================================================================

@@ -1,10 +1,11 @@
-# services/ai-orchestrator · RAG 检索/生成编排层（W33：四约束生成 + 引用校验 + answerable）
+# services/ai-orchestrator · RAG 检索/生成/导入编排层（W33 生成 + task-85 知识导入）
 
-> 任务：`task-76`（W30 PoC）/ `task-77`（W31 索引管道）/ `task-78`（W32 检索加固）/ **`task-79`（W33 生成层：四约束生成 + 引用硬校验 + answerable 终判 + `/internal/rag/answer`）**
-> 设计方案：`docs/design/知识库RAG方案.md`（V1.1） · 计划：`docs/plan/RAG-进度计划.md`
+> 任务：`task-76`（W30 PoC）/ `task-77`（W31 索引管道）/ `task-78`（W32 检索加固）/ **`task-79`（W33 生成层）** / **`task-85`（知识导入 P0/P1：preview/index/remove 内部端点）**
+> 设计方案：`docs/design/知识库RAG方案.md`（V1.1） · `docs/design/知识导入方案.md`（V1.0） · 计划：`docs/plan/RAG-进度计划.md`
 > 边界：**只在 Python 编排层**；零 Java/前端/契约改动（`apps/**`、`docs/openapi/**`、`packages/shared/**` 未触碰）。
 > 形态：CLI（ingest/reindex/selfcheck/poc/eval）+ **内网服务 `rag.service`（:4110，`X-Internal-Token` 鉴权）**：
-> `POST /internal/rag/search`（W32）、`POST /internal/rag/answer`（W33）、`GET /internal/rag/health`。
+> `POST /internal/rag/search`（W32）、`POST /internal/rag/answer`（W33）、
+> `POST /internal/rag/preview`、`POST /internal/rag/index`、`POST /internal/rag/remove`（task-85）、`GET /internal/rag/health`。
 
 ## 1. 目录
 
@@ -25,13 +26,14 @@
 | `rag/retriever.py` | `format_context`（`[n] 来源｜分类｜标题｜相似度`，≤6000 字）+ 纯向量基线（同样强制项目作用域） |
 | `rag/generation.py` | **W33 生成层**：`PROMPT_VERSION`（w33-v1）+ 四约束/证据不可信/话术红线的 System Prompt；答案 `[n] ⊆ 上下文编号` 硬校验 + 追加提示重试 1 次 → 仍失败降级 `retrieval_only`；版本意图（`expired_trap`）`versionNotice`；越权/隐私门控；`answerable` 终判（guard + 生成结果 + 越权）；无 Key/mock/超时降级 |
 | `rag/indexer.py` | 索引管道：切分 → 向量化 → 入库 → `expire_scan`（过期归档）→ 审计 JSONL；`reindex/remove/supersede/expire_scan` |
+| `rag/importer.py` | **task-85 知识导入编排**：md/txt 直读、docx（python-docx：段落 + 表格→Markdown 行组 + 标题层级）、pdf（pypdf：逐页提取、空页告警、加密/扫描件可读报错）；归一化（全半角/空白/页码行/页眉页脚）；复用 `screener` 脱敏（`piiMaskedCount`）；复用 `chunker` 结构切分（seq/sectionPath/charCount）；去重（归一化文本 sha256 + `source_hash` 精确命中 + 可选 embedding 近似 ≥0.95）；安全限制（≤10MB / ≤200000 字符 / 解析超时 30s / 扩展名白名单）；`index_knowledge`（幂等 upsert）/`remove_knowledge` |
 | `rag/ingest.py` | CLI：Java KB + 演示语料 → 脱敏/切分 → embedding → Chroma（`--rebuild/--mock-embed/--limit/--no-corpus/--source-json`） |
 | `rag/reindex.py` | CLI 增量：`--knowledge-id K-002` / `--remove` / `--expire-scan` / `--supersede V2.0` / `--history N` |
 | `rag/selfcheck.py` | CLI 索引质量自检：条数/孤儿/过期残留/重复 sourceHash/空向量/维度/metadata/金标 gold；输出 JSON + 非零退出码 |
 | `rag/poc.py` | CLI 金标评测：主指标 + **项目过滤前后对照** + **answerable 阈值扫描曲线** + `off/conditional/always/shadow` 重排统计 |
-| `rag/service.py` | **内网服务（W32 检索 + W33 生成）**：标准库 `http.server`（:4110）、`POST /internal/rag/search`、`POST /internal/rag/answer`、`GET /internal/rag/health`（llm/embedding/vectorStore/reranker 组件状态 + promptVersion）、`X-Internal-Token`（未配置 → 401）、`--dry-run` |
+| `rag/service.py` | **内网服务（W32 检索 + W33 生成 + task-85 导入）**：标准库 `http.server`（:4110）、`POST /internal/rag/search`、`POST /internal/rag/answer`、`POST /internal/rag/preview`、`POST /internal/rag/index`、`POST /internal/rag/remove`、`GET /internal/rag/health`（llm/embedding/vectorStore/reranker/**importer** 组件状态 + promptVersion）、`X-Internal-Token`（未配置 → 401）、`--dry-run`；导入端点请求体上限 16MB（base64 文件） |
 | `rag/corpus/` | 演示语料（mock）81 篇：3 演示项目、多版本/过期/草稿/待复核/驳回样本、表格/代码块/问答对/≥2k 字长文 |
-| `tests/` | `unittest`（**255 条**）：切分/脱敏/BM25/RRF（含跨进程 hash 种子确定性）/项目作用域/拒答守卫/重排控制器/检索服务（HTTP 401/200）/**生成层（四约束 Prompt、引用重试降级、版本意图、越权、超时/无 Key 降级）**/store/embedder/indexer/selfcheck |
+| `tests/` | `unittest`（**308 条**）：切分/脱敏/BM25/RRF（含跨进程 hash 种子确定性）/项目作用域/拒答守卫/重排控制器/检索服务（HTTP 401/200）/**生成层**/store/embedder/indexer/selfcheck/**知识导入（md/docx/pdf 解析、空/加密/损坏文件、超限、PII 计数、切分结构、去重命中、index 幂等、remove、preview/index/remove 端点）** |
 
 金标集与结果：
 
@@ -91,6 +93,9 @@ python -m rag.poc --mock-embed --limit 20 --out ../../tests/rag/results/rag-poc-
 
 # 7) 单测（仓库根目录或本目录均可）
 python -m unittest discover -s tests -t .
+
+# 8) 知识导入冒烟（task-85）：起临时编排层 :4111（mock embedding + 内存向量库 + 临时目录）
+python tests/rag/smoke_import.py
 ```
 
 ## 3. 实测环境约束（2026-11-16，详见报告）
@@ -134,9 +139,125 @@ python -m unittest discover -s tests -t .
 | 知识过期（`effectiveTo < today`） | `expire_scan` → `status=expired` + `archived=true`；召回层再加**生效期兜底** |
 | 未传项目作用域 | 默认平台级 `ALL` + **显式 WARNING 日志**（不静默全库召回） |
 | 检索服务未配置 token | **所有请求 401 `token_not_configured`**（fail-closed，避免检索服务裸奔） |
+| **导入**：`python-docx` / `pypdf` 缺失 | health `importer.docx/pdf=false`（`available` 仍为 true：粘贴/md/txt 可用）；对应格式上传 → 422 `parse_failed`（`reason=*_dependency_missing`） |
+| **导入**：近似去重（embedding/向量查询）失败 | 只告警 `dedupe_approx_skipped`，不阻断预览（精确去重不受影响） |
+| **导入**：索引库不可读（去重失败） | 只告警 `dedupe_skipped`，预览照常返回 |
 
 ## 5. 不入库物
 
 `.data/`（Chroma 索引、embedding 缓存、manifest、**索引审计 JSONL**、日志、冒烟临时文件）已在
 `services/ai-orchestrator/.gitignore` 忽略；参考工程 `.env` 的密钥**只读不复制**，
 仓库内不保存任何真实 key/明文 PII；演示语料全部虚构（`demo: true`，加载期 PII 自检）。
+
+## 6. 知识导入内部协议（task-85，P0/P1）
+
+> 设计依据：`docs/design/知识导入方案.md` §3/§4/§5.2。**只做内部协议（`/internal/rag/*`），不改 `docs/openapi`、
+> 不改 Java 契约**；Java BFF 侧（`/api/v1/knowledge/imports*`）由契约任务另行落地，字段对齐见下。
+
+### 6.1 端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/internal/rag/preview` | 解析 + 归一化 + PII 脱敏 + 结构切分 + 去重提示（**不写库**） |
+| `POST` | `/internal/rag/index` | 单知识 upsert（写 Chroma/内存库 + 元数据；幂等） |
+| `POST` | `/internal/rag/remove` | 撤销（删除该 `knowledgeId` 全部 chunk + 审计） |
+| `GET` | `/internal/rag/health` | 新增 `importer: {available, docx, pdf}` 组件（其余字段不变） |
+
+鉴权同既有口径：`X-Internal-Token`（只读 `RAG_INTERNAL_TOKEN`，未配置 → 全部 401）；
+响应信封 `{ok, data}` / `{ok, error: {code, message, reason?}}`；keep-alive/日志不落正文的口径不变。
+
+### 6.2 `POST /internal/rag/preview`
+
+请求：
+
+```jsonc
+{
+  "fileName": "物业费说明.md",       // 可选：标题建议用（去扩展名）；扩展名必须白名单
+  "fileType": "md",                  // 必填：txt | md | docx | pdf（markdown → md）
+  "text": "……",                     // txt/md：直接粘贴文本（E1）
+  "contentBase64": "UEsDBA…",        // docx/pdf（及 txt/md 文件上传）：base64；≤10MB
+  "projectId": "P-JZY",              // 必填（不参与解析，供 Java 侧核对/日志）
+  "title": "可选标题"                 // 可选：优先作为 suggestedTitle
+}
+```
+
+响应 `data`：
+
+```jsonc
+{
+  "suggestedTitle": "物业费说明",      // 显式 title > 文件名去扩展名 > 正文首个 heading > 未命名知识-<日期>
+  "charCount": 106,                   // 归一化后正文字符数（≤200000，超限 413）
+  "piiMaskedCount": 2,                // 手机号+身份证+邮箱命中并已掩码的总数
+  "chunks": [{"seq": 1, "sectionPath": "物业费说明 > 计费口径", "text": "……", "charCount": 120}],
+  "totalChunks": 1,
+  "warnings": [{"code": "pii_masked", "message": "已自动脱敏 2 处个人信息（手机号/身份证/邮箱）"}],
+  "duplicates": [{"knowledgeId": "K-OLD", "title": "旧版说明", "similarity": 1.0}],
+  "contentMasked": "……"               // 归一化+脱敏后的全文（Java 存档/commit 用；≤200000 字符，超出截断并告警）
+}
+```
+
+`chunks[].seq` **从 1 起连续且稳定**（对齐 `docs/openapi` 的 `KnowledgeImportPreviewChunk` / `commit.chunks` 勾选口径）。
+
+`warnings[].code`：契约已知码 `pii_masked` / `duplicate_suspected` / `truncated`；实现附加诊断码
+`page_number_removed`、`header_footer_removed`、`pdf_empty_page`、`docx_tables_extracted`、
+`text_encoding_fallback`、`dedupe_skipped`、`dedupe_approx_skipped`（契约规定「未知 code 前端按通用警告展示」）。
+
+错误映射（HTTP 状态 ↔ `error.code` ↔ `error.reason`）：
+
+| 状态 | `code` | 典型 `reason` |
+|---|---|---|
+| 400 | `bad_request` | `unsupported_extension` / `unsupported_file_type` / `file_type_mismatch` / `missing_file_type` / `invalid_base64` / `missing_content` / `binary_requires_base64` / `binary_content` |
+| 413 | `payload_too_large` | `file_too_large`（>10MB）/ `content_too_large`（>200000 字符）/ `body_too_large`（请求体 >16MB） |
+| 422 | `parse_failed` | `pdf_encrypted` / `pdf_empty_text` / `pdf_bad_magic` / `pdf_parse_error` / `docx_bad_magic` / `docx_parse_error` / `docx_empty_text` / `empty_text` / `empty_chunks` / `parse_timeout` |
+| 500 | `E-INTERNAL` | 服务内部错误（不泄漏堆栈） |
+
+### 6.3 `POST /internal/rag/index`
+
+```jsonc
+{
+  "knowledgeId": "K-IMP-001", "title": "物业费说明", "projectId": "P-JZY",
+  "category": "fee", "owner": "王管家", "version": "V1.0",
+  "effectiveFrom": "2026-01-01", "effectiveTo": "",
+  "status": "published",             // 缺省 published（召回只取 published，未审内容不得进召回）
+  "content": "……",                   // 通常是 preview.contentMasked（≤200000 字符）
+  "sourceDocId": "DOC-001",          // 可选：来源文档 ID（元数据 source_doc_id）
+  "checksum": "sha256-…"             // 幂等键；缺省按 content sha256 计算
+}
+```
+
+响应：`{"ok": true, "data": {"knowledgeId": "K-IMP-001", "chunks": 3, "indexedAt": "2026-11-17T22:45:19+08:00", "skipped": false}}`
+
+幂等：同 `knowledgeId + checksum` 已存在 → `skipped: true`（不重复写、`chunks` 为库内现有块数）；
+checksum 变化 → 先删旧 chunk 再写入（`chunk_id = {knowledgeId}#{seq}` 稳定）。
+写入元数据追加：`doc_checksum` / `content_sha256`（归一化脱敏文本 sha256，供 preview 精确去重）/
+`source_doc_id` / `indexed_at`；失败返回 400/413/422，**不产生半成品索引**。
+
+### 6.4 `POST /internal/rag/remove`
+
+```jsonc
+{"knowledgeId": "K-IMP-001"}
+→ {"ok": true, "data": {"removed": 3}}
+```
+
+复用 `indexer.remove_knowledge`（写 `.data/rag/index-audit.jsonl` 审计），并立即失效检索器 BM25 缓存
+（否则撤销后仍可能被 BM25 召回）。
+
+### 6.5 去重口径
+
+1. **精确（默认，无 embedding 成本）**：
+   - 知识级：`content_sha256`/`doc_checksum` 与本次归一化脱敏文本 sha256 相等 → `similarity=1.0`；
+   - chunk 级：对 `store.all_chunks()` 的 `source_hash` 做命中（含 `{title}：{chunkText}` 前缀变体，
+     因为入库 chunk 正文带标题前缀）→ `similarity=1.0`。
+2. **近似（可选）**：新文本首块 embedding → 向量库 top5，余弦 ≥0.95 → `similarity=0.95…`；
+   embedding/查询失败只加 `dedupe_approx_skipped` 告警，不阻断预览。
+3. `duplicates` 按 `knowledgeId` 聚合、最多 5 条；Java 侧默认提示跳过，可经「强制新建」覆盖。
+
+### 6.6 依赖与安全
+
+- `python-docx`（docx）、`pypdf`（pdf）为**格式解析依赖**，缺失时 health `importer.docx/pdf=false`、
+  对应上传 422 `*_dependency_missing`；粘贴文本与 md/txt 不依赖它们。
+- 安全限制：单文件 ≤10MB、正文字符 ≤200000、解析超时 30s（`ThreadPoolExecutor` 超时即 422）、
+  扩展名白名单`txt/md/markdown/docx/pdf`（其余 400）；txt 含 NUL 视为二进制拒绝；
+  docx/pdf 先校验魔数（`PK` / `%PDF-`）。
+- 隐私：预览/索引均先 `screener` 掩码（手机号/身份证/邮箱）；日志只记文件类型/字符数/块数/PII 计数/重复数。
+- 冒烟：`python tests/rag/smoke_import.py`（起 :4111，mock embedding + 内存库 + 临时目录；24 项检查）。
